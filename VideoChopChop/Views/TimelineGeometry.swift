@@ -45,12 +45,22 @@ nonisolated enum TimelineGeometry {
         )
     }
 
-    /// The timeline scale at which the shortest scene is exactly wide enough for its thumbnail plus
-    /// `sidePadding` (a fraction of the thumbnail's width) of breathing room on each side.
+    /// The timeline scale at which the "smallest typical" scene is exactly wide enough for its thumbnail
+    /// plus `sidePadding` (a fraction of the thumbnail's width) of breathing room on each side.
     /// Every other scene is then sized in proportion to its duration. Returns 0 when there is nothing to size.
-    static func comfortablePixelsPerSecond(scenes: [SceneSegment], thumbnailWidth: CGFloat, sidePadding: CGFloat = 0.1) -> CGFloat {
-        guard thumbnailWidth > 0, let shortest = scenes.map(\.duration).filter({ $0 > 0 }).min() else { return 0 }
-        return thumbnailWidth * (1 + 2 * sidePadding) / CGFloat(shortest)
+    ///
+    /// The reference scene is the one at `percentile` of the sorted durations (nearest rank), not the absolute
+    /// shortest: a single stray sub-second scene in a long video would otherwise set the scale for everything
+    /// and make every normal scene many times wider than needed. With 10 or fewer scenes that is simply the
+    /// shortest scene. Scenes shorter than the reference get a shrunken thumbnail (see `fittedThumbnailSize`).
+    static func comfortablePixelsPerSecond(
+        scenes: [SceneSegment], thumbnailWidth: CGFloat, sidePadding: CGFloat = 0.1, percentile: Double = 0.10
+    ) -> CGFloat {
+        let durations = scenes.map(\.duration).filter { $0 > 0 }.sorted()
+        guard thumbnailWidth > 0, !durations.isEmpty else { return 0 }
+        let rank = Int((Double(durations.count) * percentile).rounded(.up)) - 1
+        let reference = durations[min(max(rank, 0), durations.count - 1)]
+        return thumbnailWidth * (1 + 2 * sidePadding) / CGFloat(reference)
     }
 
     /// Scales a thumbnail down (keeping its aspect ratio) so it fits inside a short scene,

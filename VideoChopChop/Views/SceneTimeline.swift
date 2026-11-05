@@ -21,7 +21,7 @@ final class SceneTimelineView: NSView {
     var scenes: [SceneSegment] = [] { didSet { relayout() } }
     var thumbnails: [Int: CGImage] = [:] { didSet { relayout() } }
     var duration = 0.0 { didSet { relayout() } }
-    /// Multiplies the comfortable scale (shortest scene = thumbnail + 10% each side). Below 1 zooms out,
+    /// Multiplies the comfortable scale (smallest typical scene = thumbnail + 10% each side). Below 1 zooms out,
     /// but the timeline is never narrower than the window.
     var zoom = 1.0 { didSet { relayout() } }
     var playhead = 0.0 { didSet { playheadMoved() } }

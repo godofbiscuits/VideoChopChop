@@ -58,6 +58,36 @@ struct TimelineGeometryTests {
         #expect(abs(pps * 10 - 2400) < 1e-9)
     }
 
+    @Test func oneStraySubSecondSceneDoesNotSetTheScaleForALongVideo() {
+        func scene(_ i: Int, _ start: Double, _ end: Double) -> SceneSegment {
+            SceneSegment(index: i, startTime: start, endTime: end, startFrame: 0, endFrame: 1, cutScore: 0)
+        }
+        // 25 scenes: a 0.2 s stray at the end of a video made of 2-10 s scenes.
+        var scenes: [SceneSegment] = []
+        var time = 0.0
+        for i in 0..<24 {
+            let length = 2.0 + Double(i % 5) * 2        // 2, 4, 6, 8, 10, 2, ...
+            scenes.append(scene(i, time, time + length))
+            time += length
+        }
+        scenes.append(scene(24, time, time + 0.2))
+
+        let robust = TimelineGeometry.comfortablePixelsPerSecond(scenes: scenes, thumbnailWidth: 100)
+        // Reference is the 3rd-shortest scene (10th percentile of 25 -> rank 3), 2 s: 120 pt over 2 s.
+        #expect(abs(robust - 60) < 1e-9)
+        // The old "shortest scene" rule would have given 600 pt/s, ten times wider.
+        #expect(robust < 100)
+        let byTheMinimum = TimelineGeometry.comfortablePixelsPerSecond(scenes: scenes, thumbnailWidth: 100, percentile: 0)
+        #expect(abs(byTheMinimum - 600) < 1e-9)
+    }
+
+    @Test func tenOrFewerScenesStillUseTheShortestOne() {
+        let scenes = (0..<10).map {
+            SceneSegment(index: $0, startTime: Double($0) * 3, endTime: Double($0) * 3 + ($0 == 4 ? 0.5 : 3), startFrame: 0, endFrame: 1, cutScore: 0)
+        }
+        #expect(abs(TimelineGeometry.comfortablePixelsPerSecond(scenes: scenes, thumbnailWidth: 100) - 240) < 1e-9)
+    }
+
     @Test func comfortableScaleHandlesNothingToSize() {
         #expect(TimelineGeometry.comfortablePixelsPerSecond(scenes: [], thumbnailWidth: 100) == 0)
         let scenes = [SceneSegment(index: 0, startTime: 0, endTime: 5, startFrame: 0, endFrame: 1, cutScore: 0)]
