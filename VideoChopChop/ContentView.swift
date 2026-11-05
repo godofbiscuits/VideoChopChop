@@ -5,19 +5,18 @@
 //  Created by Jeffrey Barbose on 11/5/26.
 //
 
-import AVKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var model = VideoModel()
     @State private var showingInspector = true
 
+    private let timelineHeight = SceneTimelineView.totalHeight + 12
+
     var body: some View {
-        NavigationSplitView {
-            sceneList
-                .navigationSplitViewColumnWidth(min: 180, ideal: 220)
-        } detail: {
+        VStack(spacing: 0) {
+            timeline
+            Divider()
             detail
         }
         .inspector(isPresented: $showingInspector) {
@@ -27,6 +26,15 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem {
                 Button("Open Video", systemImage: "film") { openVideo() }
+            }
+            ToolbarItem {
+                HStack(spacing: 4) {
+                    Image(systemName: "minus.magnifyingglass").foregroundStyle(.secondary)
+                    Slider(value: $model.timelineZoom, in: 1...40)
+                        .frame(width: 120)
+                        .accessibilityLabel("Timeline zoom")
+                    Image(systemName: "plus.magnifyingglass").foregroundStyle(.secondary)
+                }
             }
             ToolbarItem {
                 Button("Inspector", systemImage: "sidebar.right") { showingInspector.toggle() }
@@ -52,25 +60,23 @@ struct ContentView: View {
         Task { await model.export(to: url) }
     }
 
-    private var sceneList: some View {
-        // Selecting a scene cues the player to its start; pressing play then plays just that scene.
-        List(model.scenes, selection: $model.selectedSceneIndex) { scene in
-            VStack(alignment: .leading, spacing: 4) {
-                if let url = model.videoURL { SceneThumbnail(url: url, time: scene.startTime) }
-                Text("Scene \(scene.index + 1)").font(.headline)
-                Text("\(scene.startTime.formatted(.number.precision(.fractionLength(2)))) s · \(scene.duration.formatted(.number.precision(.fractionLength(2)))) s · \(scene.endFrame - scene.startFrame) frames")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .overlay {
-            if model.scenes.isEmpty {
-                ContentUnavailableView(
-                    model.videoURL == nil ? "No video" : "No scenes yet",
-                    systemImage: "film",
-                    description: Text(model.videoURL == nil ? "Open a video to find its scene cuts." : "Analysis hasn't finished.")
-                )
-            }
+    /// Final Cut style timeline across the top: scene markers with thumbnails centered between them.
+    @ViewBuilder
+    private var timeline: some View {
+        if model.scenes.isEmpty {
+            Text(model.videoURL == nil ? "Open a video to find its scene cuts."
+                 : model.isAnalyzing ? "Finding scene cuts…" : "No scenes found.")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .frame(height: timelineHeight)
+                .background(.quaternary.opacity(0.4))
+        } else {
+            SceneTimeline(
+                scenes: model.scenes, thumbnails: model.thumbnails, duration: model.duration,
+                playhead: model.currentSeconds, selectedSceneIndex: model.selectedSceneIndex,
+                zoom: model.timelineZoom, onScrub: model.seek(to:), onSelectScene: model.selectScene(_:)
+            )
+            .frame(height: timelineHeight)
         }
     }
 
@@ -81,13 +87,6 @@ struct ContentView: View {
                 .overlay {
                     if model.videoURL == nil { Text("Open a video to begin").foregroundStyle(.secondary) }
                 }
-            if !model.scenes.isEmpty {
-                SceneTimeline(
-                    scenes: model.scenes, duration: model.duration, playhead: model.currentSeconds,
-                    selectedSceneIndex: model.selectedSceneIndex, onScrub: model.seek(to:)
-                )
-                .frame(height: 32)
-            }
             statusBar
         }
         .padding()

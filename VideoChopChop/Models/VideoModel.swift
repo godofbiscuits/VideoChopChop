@@ -32,9 +32,15 @@ final class VideoModel {
         didSet { if selectedSceneIndex != oldValue { selectionChanged() } }
     }
 
+    /// First frame of each scene, keyed by scene index; filled in after analysis.
+    private(set) var thumbnails: [Int: CGImage] = [:]
+    /// Timeline zoom: 1 fits the whole video in the window.
+    var timelineZoom = 1.0
+
     let player = AVPlayer()
     /// Current playback position, updated about 30 times a second (drives the timeline playhead).
     private(set) var currentSeconds = 0.0
+    @ObservationIgnored private var thumbnailTask: Task<Void, Never>?
     @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var isAdvancingSelection = false
     @ObservationIgnored private var endObserver: Task<Void, Never>?
@@ -59,6 +65,8 @@ final class VideoModel {
         scopedURL = url.startAccessingSecurityScopedResource() ? url : nil
 
         videoURL = url
+        thumbnailTask?.cancel()
+        thumbnails = [:]
         selectedSceneIndex = nil
         scenes = []
         statusMessage = nil
@@ -87,6 +95,7 @@ final class VideoModel {
                 }
                 selectedSceneIndex = nil
                 scenes = found
+                loadThumbnails(for: found)
                 statusMessage = "Found \(found.count) scene\(found.count == 1 ? "" : "s")."
             } catch is CancellationError {
                 statusMessage = "Analysis cancelled."
@@ -94,6 +103,36 @@ final class VideoModel {
                 errorMessage = "Analysis failed: \(error.localizedDescription)"
             }
             isAnalyzing = false
+        }
+    }
+
+    /// One shared generator produces every scene's first frame, in order, so thumbnails fill in left to right.
+    private func loadThumbnails(for scenes: [SceneSegment]) {
+        thumbnailTask?.cancel()
+        thumbnails = [:]
+        guard let url = videoURL else { return }
+        thumbnailTask = Task {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 240, height: 240)
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .zero
+            for scene in scenes {
+                if Task.isCancelled { return }
+                if let result = try? await generator.image(at: CMTime(seconds: scene.startTime, preferredTimescale: 60000)) {
+                    thumbnails[scene.index] = result.image
+                }
+            }
+        }
+    }
+
+    /// Selects a scene: cues the player to its start. Choosing the current scene again re-cues it,
+    /// which is how you replay a scene after it has played.
+    func selectScene(_ index: Int) {
+        if selectedSceneIndex == index {
+            selectionChanged()
+        } else {
+            selectedSceneIndex = index
         }
     }
 

@@ -63,6 +63,30 @@ struct ScenePlaybackTests {
         #expect(model.player.timeControlStatus == .paused)
     }
 
+    @Test func thumbnailsAreGeneratedForEveryScene() async throws {
+        let (model, url) = try await openThreeSceneVideo()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let loaded = await wait(timeout: 10) { model.thumbnails.count == 3 }
+        #expect(loaded, "thumbnails: \(model.thumbnails.keys.sorted())")
+        #expect(model.thumbnails.values.allSatisfy { $0.width > 0 && $0.width <= 240 })
+    }
+
+    @Test func selectingTheCurrentSceneAgainRecuesIt() async throws {
+        let (model, url) = try await openThreeSceneVideo()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        model.selectScene(1)
+        let cued = await wait(timeout: 3) { abs(model.player.currentTime().seconds - 1.0) < 0.1 }
+        #expect(cued)
+
+        // Move the playhead away without going through the model (as playing would), then pick the same scene again.
+        await model.player.seek(to: CMTime(seconds: 1.8, preferredTimescale: 600))
+        model.selectScene(1)
+        let recued = await wait(timeout: 3) { abs(model.player.currentTime().seconds - 1.0) < 0.1 }
+        #expect(recued, "at \(model.player.currentTime().seconds)")
+    }
+
     @Test func playheadFollowsScrubbing() async throws {
         let (model, url) = try await openThreeSceneVideo()
         defer { try? FileManager.default.removeItem(at: url) }
