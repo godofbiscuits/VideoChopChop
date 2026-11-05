@@ -10,6 +10,12 @@
       "Base",
     ],
   },
+  "packages": [
+    {
+      "kind": "local",
+      "path": "Packages/JXLKit",
+    },
+  ],
   "files": [
     { "kind": "folder", "path": "VideoChopChop", "target-membership": [ "VideoChopChop" ] },
     { "kind": "folder", "path": "VideoChopChopTests", "target-membership": [ "VideoChopChopTests" ] },
@@ -35,6 +41,12 @@
         "frameworks",
         "resources",
       ],
+      "package-product-members": [
+        {
+          "product-name": "JXLKit",
+          "build-phase": { "build-phase": "frameworks" },
+        },
+      ],
       "build-settings": {
         "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
         "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
@@ -53,6 +65,7 @@
           "@executable_path/../Frameworks",
         ],
         "MARKETING_VERSION": "1.0",
+        "NEW_SETTING": "",
         "PRODUCT_BUNDLE_IDENTIFIER": "com.ampbang.VideoChopChop",
         "PRODUCT_NAME": "$(TARGET_NAME)",
         "REGISTER_APP_GROUPS": "YES",
@@ -63,6 +76,7 @@
         "SWIFT_STRICT_CONCURRENCY": "complete",
         "SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY": "YES",
         "SWIFT_VERSION": "6.0",
+        "other": "",
       },
     }, {
       "name": "VideoChopChopTests",

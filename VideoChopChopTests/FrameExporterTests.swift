@@ -4,7 +4,9 @@
 //
 
 import Foundation
+import ImageIO
 import Testing
+import UniformTypeIdentifiers
 @testable import VideoChopChop
 
 /// Stand-in encoder so exporter behavior is tested independently of libjxl.
@@ -62,6 +64,34 @@ struct FrameExporterTests {
         let json = try Data(contentsOf: output.appendingPathComponent("scenes.json"))
         let decoded = try JSONDecoder().decode(ExportManifest.self, from: json)
         #expect(decoded == manifest)
+    }
+
+    @Test func exportsRealJPEGXLFiles() async throws {
+        let encoder = try #require(FrameEncoders.jpegXL(JXLSettings()), "JXLKit must be linked to the app target")
+        let video = try await makeTestVideo(segments: [.solid(220, 30, 30, frames: 6)])
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("export-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: video)
+            try? FileManager.default.removeItem(at: output)
+        }
+        let scene = SceneSegment(index: 0, startTime: 0, endTime: 0.2, startFrame: 0, endFrame: 6, cutScore: 0)
+        try await FrameExporter().export(
+            url: video, scenes: [scene], to: output, options: ExportOptions(selection: .every(6)), encoder: encoder
+        )
+
+        let file = output.appendingPathComponent("scene_001/frame_000000.jxl")
+        let source = try #require(CGImageSourceCreateWithURL(file as CFURL, nil))
+        #expect(CGImageSourceGetType(source) as String? == UTType.jpegxl.identifier)
+        let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        #expect(image.width == 320 && image.height == 180)
+
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try #require(CGContext(
+            data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 320, height: 180))
+        #expect(pixel[0] > 150 && pixel[2] < 100)
     }
 
     @Test func filterChainIsAppliedToExportedFrames() async throws {

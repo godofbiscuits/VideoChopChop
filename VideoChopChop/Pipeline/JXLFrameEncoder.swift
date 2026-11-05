@@ -7,6 +7,7 @@
 //
 
 #if canImport(JXLKit)
+import Foundation
 import JXLKit
 
 nonisolated struct JXLFrameEncoder: FrameEncoder {
