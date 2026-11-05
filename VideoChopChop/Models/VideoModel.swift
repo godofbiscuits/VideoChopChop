@@ -33,6 +33,9 @@ final class VideoModel {
     }
 
     let player = AVPlayer()
+    /// Current playback position, updated about 30 times a second (drives the timeline playhead).
+    private(set) var currentSeconds = 0.0
+    @ObservationIgnored private var timeObserver: Any?
     @ObservationIgnored private var isAdvancingSelection = false
     @ObservationIgnored private var endObserver: Task<Void, Never>?
     private var scopedURL: URL?
@@ -40,6 +43,13 @@ final class VideoModel {
     private var analysisTask: Task<Void, Never>?
 
     var canExportJXL: Bool { FrameEncoders.jpegXL(jxl) != nil }
+
+    init() {
+        // AVPlayer's periodic observer also fires on seeks, so the playhead follows scrubbing too.
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] time in
+            MainActor.assumeIsolated { self?.currentSeconds = time.seconds }
+        }
+    }
 
     // MARK: Opening
 

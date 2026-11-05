@@ -82,7 +82,11 @@ struct ContentView: View {
                     if model.videoURL == nil { Text("Open a video to begin").foregroundStyle(.secondary) }
                 }
             if !model.scenes.isEmpty {
-                TimelineStrip(scenes: model.scenes, duration: model.duration, onSeek: model.seek(to:))
+                SceneTimeline(
+                    scenes: model.scenes, duration: model.duration, playhead: model.currentSeconds,
+                    selectedSceneIndex: model.selectedSceneIndex, onScrub: model.seek(to:)
+                )
+                .frame(height: 32)
             }
             statusBar
         }

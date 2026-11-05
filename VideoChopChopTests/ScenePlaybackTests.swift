@@ -63,6 +63,15 @@ struct ScenePlaybackTests {
         #expect(model.player.timeControlStatus == .paused)
     }
 
+    @Test func playheadFollowsScrubbing() async throws {
+        let (model, url) = try await openThreeSceneVideo()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        model.seek(to: 1.5)
+        let followed = await wait(timeout: 3) { abs(model.currentSeconds - 1.5) < 0.1 }
+        #expect(followed, "currentSeconds = \(model.currentSeconds)")
+    }
+
     @Test func timelineSeekClearsTheSceneLimit() async throws {
         let (model, url) = try await openThreeSceneVideo()
         defer { try? FileManager.default.removeItem(at: url) }
