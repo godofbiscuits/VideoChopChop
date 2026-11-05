@@ -1,8 +1,8 @@
 {
   "default-configuration": "Release",
   "configurations": [
-    "Debug",
-    "Release",
+    { "name": "Debug", "file": "Metal.xcconfig" },
+    { "name": "Release", "file": "Metal.xcconfig" },
   ],
   "localizations": {
     "development": "en",
@@ -21,6 +21,13 @@
     { "kind": "folder", "path": "VideoChopChopTests", "target-membership": [ "VideoChopChopTests" ] },
     { "kind": "folder", "path": "VideoChopChopUITests", "target-membership": [ "VideoChopChopUITests" ] },
     {
+      "path": "Metal.xcconfig",
+      "target-membership": [
+        "VideoChopChop/resources",
+        "VideoChopChopTests/resources",
+        "VideoChopChopUITests/resources",
+      ],
+    }, {
       "kind": "group",
       "name": "Products",
       "children": [

@@ -1,0 +1,5 @@
+// Metal flags for precompiled Core Image kernels (Filters/Kernels.ci.metal).
+// Attach in Xcode: Project > Info > Configurations > set Debug and Release to this file
+// for the VideoChopChop target (or merge these lines into an existing xcconfig).
+MTL_COMPILER_FLAGS = -fcikernel
+MTLLINKER_FLAGS = -cikernel
