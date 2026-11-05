@@ -26,7 +26,15 @@ final class VideoModel {
     var representativeOnly = false
     var jxl = JXLSettings()
 
+    /// The scene the player is cued to. While set, playback stops at the end of that scene
+    /// (the start of the next one) via `AVPlayerItem.forwardPlaybackEndTime`.
+    var selectedSceneIndex: Int? {
+        didSet { if selectedSceneIndex != oldValue { selectionChanged() } }
+    }
+
     let player = AVPlayer()
+    @ObservationIgnored private var isAdvancingSelection = false
+    @ObservationIgnored private var endObserver: Task<Void, Never>?
     private var scopedURL: URL?
     private var compositionTask: Task<Void, Never>?
     private var analysisTask: Task<Void, Never>?
@@ -41,12 +49,15 @@ final class VideoModel {
         scopedURL = url.startAccessingSecurityScopedResource() ? url : nil
 
         videoURL = url
+        selectedSceneIndex = nil
         scenes = []
         statusMessage = nil
         errorMessage = nil
         let asset = AVURLAsset(url: url)
         duration = (try? await asset.load(.duration).seconds) ?? 0
-        player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+        let item = AVPlayerItem(asset: asset)
+        player.replaceCurrentItem(with: item)
+        observePlaybackEnd(of: item)
         scheduleCompositionUpdate()
         analyze()
     }
@@ -64,6 +75,7 @@ final class VideoModel {
                 let found = try await SceneCutDetector().analyze(url: url, config: config) { fraction in
                     Task { @MainActor in self.analysisProgress = fraction }
                 }
+                selectedSceneIndex = nil
                 scenes = found
                 statusMessage = "Found \(found.count) scene\(found.count == 1 ? "" : "s")."
             } catch is CancellationError {
@@ -75,8 +87,45 @@ final class VideoModel {
         }
     }
 
+    /// Free seek (e.g. a timeline click): clears any scene selection so playback runs on normally.
     func seek(to seconds: Double) {
+        selectedSceneIndex = nil
         player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    // MARK: Scene-bounded playback
+
+    private func selectionChanged() {
+        guard let index = selectedSceneIndex, scenes.indices.contains(index) else {
+            player.currentItem?.forwardPlaybackEndTime = .invalid
+            return
+        }
+        let scene = scenes[index]
+        // The last scene simply plays to the end of the video.
+        let isLast = index == scenes.count - 1
+        player.currentItem?.forwardPlaybackEndTime = isLast ? .invalid : CMTime(seconds: scene.endTime, preferredTimescale: 60000)
+        if !isAdvancingSelection {
+            player.pause()
+            player.seek(to: CMTime(seconds: scene.startTime, preferredTimescale: 60000), toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+    }
+
+    private func observePlaybackEnd(of item: AVPlayerItem) {
+        endObserver?.cancel()
+        endObserver = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: .AVPlayerItemDidPlayToEndTime, object: item) {
+                self?.sceneDidFinishPlaying()
+            }
+        }
+    }
+
+    /// The player has paused at the end of the selected scene, which is the start of the next:
+    /// cue the next scene (without seeking) so the next press of play runs it.
+    private func sceneDidFinishPlaying() {
+        guard let index = selectedSceneIndex, index + 1 < scenes.count else { return }
+        isAdvancingSelection = true
+        selectedSceneIndex = index + 1
+        isAdvancingSelection = false
     }
 
     // MARK: Preview filtering

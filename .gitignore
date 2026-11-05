@@ -2,3 +2,4 @@ Vendor/
 .build/
 xcuserdata/
 .swiftpm/
+Reference/*.mp4
