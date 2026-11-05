@@ -35,6 +35,32 @@
         { "path": "<PRODUCTS>/VideoChopChopTests.xctest", "id": "1F3E20D0309CAD15004594E4", "type": "wrapper.cfbundle", "index": false },
         { "path": "<PRODUCTS>/VideoChopChopUITests.xctest", "id": "1F3E20DA309CAD15004594E4", "type": "wrapper.cfbundle", "index": false },
       ],
+    }, {
+      "kind": "folder",
+      "path": "Reference",
+      "target-membership": [
+        "VideoChopChop",
+        "VideoChopChopTests",
+        "VideoChopChopUITests",
+      ],
+      "membership-exceptions": [
+        {
+          "target": "VideoChopChop",
+          "exclusions": [
+            "Appassionata NSFW.mp4",
+          ],
+        }, {
+          "target": "VideoChopChopTests",
+          "exclusions": [
+            "Appassionata NSFW.mp4",
+          ],
+        }, {
+          "target": "VideoChopChopUITests",
+          "exclusions": [
+            "Appassionata NSFW.mp4",
+          ],
+        },
+      ],
     },
   ],
   "targets": [
