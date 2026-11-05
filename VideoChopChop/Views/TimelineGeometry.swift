@@ -45,6 +45,14 @@ nonisolated enum TimelineGeometry {
         )
     }
 
+    /// The timeline scale at which the shortest scene is exactly wide enough for its thumbnail plus
+    /// `sidePadding` (a fraction of the thumbnail's width) of breathing room on each side.
+    /// Every other scene is then sized in proportion to its duration. Returns 0 when there is nothing to size.
+    static func comfortablePixelsPerSecond(scenes: [SceneSegment], thumbnailWidth: CGFloat, sidePadding: CGFloat = 0.1) -> CGFloat {
+        guard thumbnailWidth > 0, let shortest = scenes.map(\.duration).filter({ $0 > 0 }).min() else { return 0 }
+        return thumbnailWidth * (1 + 2 * sidePadding) / CGFloat(shortest)
+    }
+
     /// Scales a thumbnail down (keeping its aspect ratio) so it fits inside a short scene,
     /// but never below `minScale` of its natural size; below that it is clipped to the scene instead.
     static func fittedThumbnailSize(natural: CGSize, sceneWidth: CGFloat, margin: CGFloat = 6, minScale: CGFloat = 0.4) -> CGSize {

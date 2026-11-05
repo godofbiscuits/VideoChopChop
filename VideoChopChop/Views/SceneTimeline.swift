@@ -15,10 +15,14 @@ final class SceneTimelineView: NSView {
     static let thumbnailHeight: CGFloat = 52
     static var totalHeight: CGFloat { rulerHeight + trackHeight }
 
-    var scenes: [SceneSegment] = [] { didSet { needsDisplay = true } }
-    var thumbnails: [Int: CGImage] = [:] { didSet { needsDisplay = true } }
+    /// Widest the timeline will ever be, in points, however many short scenes a long video has.
+    static let maxDocumentWidth: CGFloat = 120_000
+
+    var scenes: [SceneSegment] = [] { didSet { relayout() } }
+    var thumbnails: [Int: CGImage] = [:] { didSet { relayout() } }
     var duration = 0.0 { didSet { relayout() } }
-    /// 1 fits the whole video in the visible width; larger values zoom in.
+    /// Multiplies the comfortable scale (shortest scene = thumbnail + 10% each side). Below 1 zooms out,
+    /// but the timeline is never narrower than the window.
     var zoom = 1.0 { didSet { relayout() } }
     var playhead = 0.0 { didSet { playheadMoved() } }
     var selectedSceneIndex: Int? { didSet { needsDisplay = true } }
@@ -52,9 +56,24 @@ final class SceneTimelineView: NSView {
         relayout()
     }
 
+    /// A thumbnail's natural width, from the first thumbnail's aspect ratio (16:9 until one arrives).
+    private var naturalThumbnailWidth: CGFloat {
+        let aspect = thumbnails.values.first.map { CGFloat($0.width) / CGFloat(max($0.height, 1)) } ?? 16.0 / 9.0
+        return Self.thumbnailHeight * aspect
+    }
+
     private func relayout() {
-        pixelsPerSecond = duration > 0 && visibleWidth > 0 ? visibleWidth / duration * zoom : 0
-        setFrameSize(NSSize(width: max(visibleWidth, duration * pixelsPerSecond), height: Self.totalHeight))
+        guard duration > 0 else {
+            pixelsPerSecond = 0
+            setFrameSize(NSSize(width: visibleWidth, height: Self.totalHeight))
+            needsDisplay = true
+            return
+        }
+        let fitToWindow = visibleWidth / CGFloat(duration)
+        let comfortable = TimelineGeometry.comfortablePixelsPerSecond(scenes: scenes, thumbnailWidth: naturalThumbnailWidth)
+        let capped = min(comfortable * CGFloat(zoom), Self.maxDocumentWidth / CGFloat(duration))
+        pixelsPerSecond = max(fitToWindow, capped)
+        setFrameSize(NSSize(width: max(visibleWidth, CGFloat(duration) * pixelsPerSecond), height: Self.totalHeight))
         needsDisplay = true
     }
 
@@ -204,6 +223,20 @@ final class TimelineScrollView: NSScrollView {
         super.layout()
         (documentView as? SceneTimelineView)?.fit(toVisibleWidth: contentSize.width)
     }
+
+    /// A plain mouse wheel only reports vertical movement; there is nothing to scroll vertically,
+    /// so use it to scroll the timeline sideways. Trackpad swipes with a horizontal part pass through unchanged.
+    override func scrollWheel(with event: NSEvent) {
+        guard event.scrollingDeltaX == 0, event.scrollingDeltaY != 0, let document = documentView else {
+            super.scrollWheel(with: event)
+            return
+        }
+        let step = event.hasPreciseScrollingDeltas ? event.scrollingDeltaY : event.scrollingDeltaY * 12
+        let maxX = max(document.frame.width - contentView.bounds.width, 0)
+        let x = min(max(contentView.bounds.origin.x - step, 0), maxX)
+        contentView.scroll(to: NSPoint(x: x, y: contentView.bounds.origin.y))
+        reflectScrolledClipView(contentView)
+    }
 }
 
 struct SceneTimeline: NSViewRepresentable {
@@ -220,7 +253,9 @@ struct SceneTimeline: NSViewRepresentable {
         let scrollView = TimelineScrollView()
         scrollView.hasHorizontalScroller = true
         scrollView.hasVerticalScroller = false
-        scrollView.autohidesScrollers = true
+        // A permanent scroll bar, so it's obvious the timeline scrolls.
+        scrollView.scrollerStyle = .legacy
+        scrollView.autohidesScrollers = false
         scrollView.drawsBackground = false
         scrollView.documentView = SceneTimelineView(frame: NSRect(x: 0, y: 0, width: 100, height: SceneTimelineView.totalHeight))
         return scrollView

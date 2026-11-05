@@ -46,13 +46,78 @@ struct SceneTimelineViewTests {
 
     private let spineY = Int(SceneTimelineView.rulerHeight + SceneTimelineView.trackHeight / 2)
 
-    @Test func intrinsicSizeAndZoom() {
-        let view = makeTimeline()
-        #expect(view.frame.width == 400)
+    /// Natural thumbnail width for 16:9 images, and the comfortable scale for 1 s scenes (thumbnail + 10% each side).
+    private let thumbnailWidth = SceneTimelineView.thumbnailHeight * 16.0 / 9.0
+    private var comfortableForOneSecondScenes: CGFloat { thumbnailWidth * 1.2 }
+
+    @Test func zoomMultipliesTheComfortableScaleAndWidensTheView() {
+        let view = makeTimeline()   // 2 x 1 s scenes in a 400 pt window
+        // Comfortable (about 111 pt/s) is narrower than the window (200 pt/s), so the window wins at zoom 1.
         #expect(view.pixelsPerSecond == 200)
+        #expect(view.frame.width == 400)
         view.zoom = 4
-        #expect(view.pixelsPerSecond == 800)
-        #expect(view.frame.width == 1600)
+        #expect(abs(view.pixelsPerSecond - comfortableForOneSecondScenes * 4) < 0.001)
+        #expect(abs(view.frame.width - 2 * comfortableForOneSecondScenes * 4) < 0.01)
+    }
+
+    @Test func shortestSceneIsWideEnoughForItsThumbnailPlusTenPercentEachSide() {
+        let view = SceneTimelineView(frame: NSRect(x: 0, y: 0, width: 100, height: SceneTimelineView.totalHeight))
+        view.fit(toVisibleWidth: 100)   // a narrow window, so the comfortable scale decides the width
+        view.duration = 12
+        view.scenes = [
+            SceneSegment(index: 0, startTime: 0, endTime: 10, startFrame: 0, endFrame: 1, cutScore: 0),
+            SceneSegment(index: 1, startTime: 10, endTime: 11, startFrame: 0, endFrame: 1, cutScore: 0.9),
+            SceneSegment(index: 2, startTime: 11, endTime: 12, startFrame: 0, endFrame: 1, cutScore: 0.9),
+        ]
+        view.thumbnails = [0: solidImage(.red), 1: solidImage(.green), 2: solidImage(.blue)]
+
+        let shortest = 1 * view.pixelsPerSecond
+        #expect(abs(shortest - comfortableForOneSecondScenes) < 0.01, "shortest scene is \(shortest) pt")
+        #expect(abs(10 * view.pixelsPerSecond - 10 * comfortableForOneSecondScenes) < 0.1)   // proportional
+        #expect(view.frame.width > 100, "the view should be wider than the window so it scrolls")
+        #expect(abs(view.frame.width - 12 * comfortableForOneSecondScenes) < 0.1)
+    }
+
+    @Test func timelineIsNeverNarrowerThanTheWindowAndZoomOutStopsThere() {
+        let view = makeTimeline()          // 400 pt window, 2 s
+        view.zoom = 0.01
+        #expect(view.pixelsPerSecond == 200)
+        #expect(view.frame.width == 400)
+    }
+
+    @Test func widthIsCappedForVeryLongVideos() {
+        let view = SceneTimelineView(frame: NSRect(x: 0, y: 0, width: 400, height: SceneTimelineView.totalHeight))
+        view.fit(toVisibleWidth: 400)
+        view.duration = 100_000
+        view.scenes = [
+            SceneSegment(index: 0, startTime: 0, endTime: 1, startFrame: 0, endFrame: 1, cutScore: 0),
+            SceneSegment(index: 1, startTime: 1, endTime: 100_000, startFrame: 0, endFrame: 1, cutScore: 0.9),
+        ]
+        #expect(view.frame.width <= SceneTimelineView.maxDocumentWidth + 1)
+    }
+
+    @Test func scrollViewScrollsAndAMouseWheelMovesItSideways() throws {
+        let scrollView = TimelineScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: SceneTimelineView.totalHeight + 18))
+        scrollView.hasHorizontalScroller = true
+        let timeline = SceneTimelineView(frame: NSRect(x: 0, y: 0, width: 300, height: SceneTimelineView.totalHeight))
+        scrollView.documentView = timeline
+        timeline.duration = 6
+        timeline.scenes = (0..<6).map {
+            SceneSegment(index: $0, startTime: Double($0), endTime: Double($0 + 1), startFrame: 0, endFrame: 1, cutScore: 0)
+        }
+        timeline.thumbnails = Dictionary(uniqueKeysWithValues: (0..<6).map { ($0, solidImage(.red)) })
+        scrollView.layoutSubtreeIfNeeded()
+
+        #expect(timeline.frame.width > scrollView.contentSize.width, "6 scenes at the comfortable scale are wider than a 300 pt window")
+        #expect(scrollView.contentView.bounds.origin.x == 0)
+
+        // Scrolling the wheel "down" (negative delta) scrolls the timeline to the right.
+        let cgEvent = try #require(CGEvent(
+            scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: -80, wheel2: 0, wheel3: 0
+        ))
+        let event = try #require(NSEvent(cgEvent: cgEvent))
+        scrollView.scrollWheel(with: event)
+        #expect(scrollView.contentView.bounds.origin.x > 0, "x = \(scrollView.contentView.bounds.origin.x)")
     }
 
     @Test func thumbnailsAreCenteredBetweenMarkers() throws {

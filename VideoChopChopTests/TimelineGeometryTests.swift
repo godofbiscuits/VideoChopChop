@@ -46,6 +46,24 @@ struct TimelineGeometryTests {
         #expect(rect.size == CGSize(width: 80, height: 45))
     }
 
+    @Test func shortestSceneGetsThumbnailPlusTenPercentEachSide() {
+        func scene(_ i: Int, _ start: Double, _ end: Double) -> SceneSegment {
+            SceneSegment(index: i, startTime: start, endTime: end, startFrame: 0, endFrame: 1, cutScore: 0)
+        }
+        let scenes = [scene(0, 0, 4), scene(1, 4, 4.5), scene(2, 4.5, 14.5)]
+        let pps = TimelineGeometry.comfortablePixelsPerSecond(scenes: scenes, thumbnailWidth: 100)
+        // Shortest scene is 0.5 s and must be 100 (thumbnail) + 10 + 10 = 120 pt wide.
+        #expect(abs(pps * 0.5 - 120) < 1e-9)
+        // Everything else is in proportion: the 10 s scene is 20x wider than the 0.5 s one.
+        #expect(abs(pps * 10 - 2400) < 1e-9)
+    }
+
+    @Test func comfortableScaleHandlesNothingToSize() {
+        #expect(TimelineGeometry.comfortablePixelsPerSecond(scenes: [], thumbnailWidth: 100) == 0)
+        let scenes = [SceneSegment(index: 0, startTime: 0, endTime: 5, startFrame: 0, endFrame: 1, cutScore: 0)]
+        #expect(TimelineGeometry.comfortablePixelsPerSecond(scenes: scenes, thumbnailWidth: 0) == 0)
+    }
+
     @Test func shortScenesShrinkTheThumbnailDownToAFloor() {
         let natural = CGSize(width: 92, height: 52)
         // Plenty of room: unchanged. Short scene: scaled to fit with a margin. Tiny scene: floored at 40%.

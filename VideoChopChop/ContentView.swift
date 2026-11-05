@@ -11,7 +11,8 @@ struct ContentView: View {
     @State private var model = VideoModel()
     @State private var showingInspector = true
 
-    private let timelineHeight = SceneTimelineView.totalHeight + 12
+    /// The timeline plus room for its always-visible scroll bar.
+    private let timelineHeight = SceneTimelineView.totalHeight + 18
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,8 +31,12 @@ struct ContentView: View {
             ToolbarItem {
                 HStack(spacing: 4) {
                     Image(systemName: "minus.magnifyingglass").foregroundStyle(.secondary)
-                    Slider(value: $model.timelineZoom, in: 1...40)
-                        .frame(width: 120)
+                    // Zoom is exponential: the slider is in powers of two around the comfortable scale.
+                    Slider(
+                        value: Binding(get: { log2(model.timelineZoom) }, set: { model.timelineZoom = pow(2, $0) }),
+                        in: -3...4
+                    )
+                    .frame(width: 120)
                         .accessibilityLabel("Timeline zoom")
                     Image(systemName: "plus.magnifyingglass").foregroundStyle(.secondary)
                 }
