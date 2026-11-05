@@ -53,11 +53,13 @@
           "target": "VideoChopChopTests",
           "exclusions": [
             "Appassionata NSFW.mp4",
+            "Gustav Klimt- The Kiss.mkv",
           ],
         }, {
           "target": "VideoChopChopUITests",
           "exclusions": [
             "Appassionata NSFW.mp4",
+            "Gustav Klimt- The Kiss.mkv",
           ],
         },
       ],

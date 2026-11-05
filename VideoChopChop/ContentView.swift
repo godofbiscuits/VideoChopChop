@@ -110,7 +110,11 @@ struct ContentView: View {
             // Containers macOS can't read (MKV, WebM) are converted first; this is usually a lossless rewrap.
             ProgressView("Converting \(model.sourceName ?? "video") for playback…", value: model.conversionProgress)
         } else if model.isAnalyzing {
-            ProgressView("Finding scene cuts…", value: model.analysisProgress)
+            if let progress = model.analysisProgress {
+                ScanProgressView(progress: progress)
+            } else {
+                ProgressView("Finding scene cuts…")   // until the first frame has been read
+            }
         } else if model.isExporting {
             ProgressView("Exporting frames…", value: model.exportProgress)
         } else if let status = model.statusMessage {

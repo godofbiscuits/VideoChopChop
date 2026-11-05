@@ -25,6 +25,21 @@ nonisolated struct SceneSegment: Sendable, Identifiable, Equatable, Codable {
     var duration: Double { endTime - startTime }
 }
 
+/// Where a scene scan has got to.
+nonisolated struct AnalysisProgress: Sendable, Equatable {
+    /// Frames read so far (1-based: the frame being examined).
+    let frame: Int
+    /// Estimated while scanning, exact when finished; never less than `frame`.
+    let totalFrames: Int
+    /// Position in the movie, in seconds.
+    let seconds: Double
+    let duration: Double
+
+    var fraction: Double {
+        duration > 0 ? min(max(seconds / duration, 0), 1) : (totalFrames > 0 ? Double(frame) / Double(totalFrames) : 0)
+    }
+}
+
 nonisolated struct SceneCutConfig: Sendable, Equatable {
     /// A cut score must exceed this regardless of recent history.
     var absoluteFloor = 0.35
@@ -99,9 +114,12 @@ actor SceneCutDetector {
     func analyze(
         url: URL,
         config: SceneCutConfig = SceneCutConfig(),
-        progress: (@Sendable (Double) -> Void)? = nil
+        progress: (@Sendable (AnalysisProgress) -> Void)? = nil
     ) async throws -> [SceneSegment] {
         let source = try await FrameSource.open(url: url)
+        // The real frame count is only known once every frame has been read, so until then it is
+        // estimated from duration and nominal frame rate (exact for constant-frame-rate video).
+        let estimatedFrames = max(Int((source.duration * source.frameRate).rounded()), 1)
         var decider = CutDecider(config: config)
         var previous: (frame: VideoFrame, signature: FrameSignature)?
         var cuts: [Cut] = []
@@ -124,9 +142,15 @@ actor SceneCutDetector {
             previous = (frame, signature)
             lastTime = frame.seconds
             frameCount = frame.index + 1
-            if frame.index % 15 == 0, source.duration > 0 { progress?(min(frame.seconds / source.duration, 1)) }
+            if frame.index % 6 == 0 {
+                progress?(AnalysisProgress(
+                    frame: frameCount, totalFrames: max(estimatedFrames, frameCount),
+                    seconds: frame.seconds, duration: source.duration
+                ))
+            }
         }
-        progress?(1)
+        // Done: the total is now exact, and the head sits at the end.
+        progress?(AnalysisProgress(frame: frameCount, totalFrames: frameCount, seconds: source.duration, duration: source.duration))
 
         let endTime = lastTime + 1 / source.frameRate
         return Self.scenes(from: cuts, firstTime: firstTime, endTime: endTime, frameCount: frameCount)

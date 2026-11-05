@@ -20,7 +20,8 @@ final class VideoModel {
     private(set) var conversionProgress = 0.0
 
     private(set) var isAnalyzing = false
-    private(set) var analysisProgress = 0.0
+    /// Nil until the scan reports its first position (and again once it is finished).
+    private(set) var analysisProgress: AnalysisProgress?
     private(set) var isExporting = false
     private(set) var exportProgress = 0.0
     private(set) var statusMessage: String?
@@ -133,13 +134,17 @@ final class VideoModel {
     func analyze() {
         guard let url = videoURL, !isAnalyzing else { return }
         isAnalyzing = true
-        analysisProgress = 0
+        analysisProgress = nil
         errorMessage = nil
         let config = sceneCutConfig
         analysisTask = Task {
             do {
-                let found = try await SceneCutDetector().analyze(url: url, config: config) { fraction in
-                    Task { @MainActor in self.analysisProgress = fraction }
+                let found = try await SceneCutDetector().analyze(url: url, config: config) { update in
+                    Task { @MainActor [weak self] in
+                        // Updates hop threads, so ignore one that arrives after a later one.
+                        guard let self, update.frame >= (self.analysisProgress?.frame ?? 0) else { return }
+                        self.analysisProgress = update
+                    }
                 }
                 selectedSceneIndex = nil
                 scenes = found
@@ -151,6 +156,7 @@ final class VideoModel {
                 errorMessage = "Analysis failed: \(error.localizedDescription)"
             }
             isAnalyzing = false
+            analysisProgress = nil
         }
     }
 
