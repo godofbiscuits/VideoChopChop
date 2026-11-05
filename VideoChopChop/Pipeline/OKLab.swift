@@ -78,13 +78,17 @@ nonisolated struct OKLabHistogram: Sendable, Equatable {
     /// Fractions of pixels per bin; sums to 1 for a non-empty image.
     private(set) var bins: [Float]
 
+    /// Pixels are split between the two nearest bins on each axis (trilinear weights), so a small
+    /// color drift gives a small histogram change instead of moving every pixel across a bin edge at once.
     init(pixels: [OKLab]) {
         var counts = [Float](repeating: 0, count: Self.binCount)
         for p in pixels {
-            let li = Self.bin(p.l, lower: 0, upper: 1, count: Self.lBins)
-            let ai = Self.bin(p.a, lower: -Self.abRange, upper: Self.abRange, count: Self.abBins)
-            let bi = Self.bin(p.b, lower: -Self.abRange, upper: Self.abRange, count: Self.abBins)
-            counts[(li * Self.abBins + ai) * Self.abBins + bi] += 1
+            let l = Self.softBin(p.l, lower: 0, upper: 1, count: Self.lBins)
+            let a = Self.softBin(p.a, lower: -Self.abRange, upper: Self.abRange, count: Self.abBins)
+            let b = Self.softBin(p.b, lower: -Self.abRange, upper: Self.abRange, count: Self.abBins)
+            for (li, lw) in l { for (ai, aw) in a { for (bi, bw) in b {
+                counts[(li * Self.abBins + ai) * Self.abBins + bi] += lw * aw * bw
+            } } }
         }
         if !pixels.isEmpty {
             let scale = 1 / Float(pixels.count)
@@ -100,8 +104,12 @@ nonisolated struct OKLabHistogram: Sendable, Equatable {
         return total
     }
 
-    private static func bin(_ value: Float, lower: Float, upper: Float, count: Int) -> Int {
-        let t = (value - lower) / (upper - lower)
-        return min(max(Int(t * Float(count)), 0), count - 1)
+    /// The two bins nearest `value` (by bin center) with linear weights that sum to 1; clamps at the edges.
+    private static func softBin(_ value: Float, lower: Float, upper: Float, count: Int) -> [(Int, Float)] {
+        let position = (value - lower) / (upper - lower) * Float(count) - 0.5
+        let clamped = min(max(position, 0), Float(count - 1))
+        let low = min(Int(clamped), count - 2)
+        let frac = clamped - Float(low)
+        return [(low, 1 - frac), (low + 1, frac)]
     }
 }
