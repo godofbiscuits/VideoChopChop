@@ -31,6 +31,11 @@ final class SceneTimelineView: NSView {
     var onScrub: ((Double) -> Void)?
     /// Click on a scene in the track: select it (cue its start; play stops at the next scene).
     var onSelectScene: ((Int) -> Void)?
+    /// A movie file was dropped on the timeline.
+    var onDropVideo: ((URL) -> Void)?
+    /// Shown in the empty track (no video yet, or analysis in progress).
+    var placeholder: String? { didSet { needsDisplay = true } }
+    private(set) var isDropTargeted = false { didSet { needsDisplay = true } }
 
     private(set) var pixelsPerSecond: CGFloat = 0
     private var visibleWidth: CGFloat = 0
@@ -44,6 +49,7 @@ final class SceneTimelineView: NSView {
         super.init(frame: frameRect)
         setAccessibilityRole(.group)
         setAccessibilityLabel("Scene timeline")
+        registerForDraggedTypes(VideoDrop.draggedTypes)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -98,11 +104,14 @@ final class SceneTimelineView: NSView {
         ruler.fill()
         drawTicks(in: dirtyRect)
 
-        // The horizontal spine the thumbnails sit on.
-        NSColor.separatorColor.setFill()
-        NSRect(x: 0, y: midY - 0.5, width: bounds.width, height: 1).fill()
+        // The horizontal spine the thumbnails sit on (left out when empty, so it doesn't strike through the message).
+        if !scenes.isEmpty {
+            NSColor.separatorColor.setFill()
+            NSRect(x: 0, y: midY - 0.5, width: bounds.width, height: 1).fill()
+        }
 
         for scene in scenes { draw(scene, midY: midY) }
+        drawPlaceholder(midY: midY)
 
         // Marker at the start of every scene.
         NSColor.systemYellow.setFill()
@@ -112,6 +121,31 @@ final class SceneTimelineView: NSView {
         }
 
         drawPlayhead()
+
+        if isDropTargeted {
+            NSColor.controlAccentColor.setStroke()
+            let border = NSBezierPath(rect: bounds.insetBy(dx: 1.5, dy: 1.5))
+            border.lineWidth = 3
+            border.stroke()
+        }
+    }
+
+    private func drawPlaceholder(midY: CGFloat) {
+        guard scenes.isEmpty, let placeholder else { return }
+        let style = NSMutableParagraphStyle()
+        style.alignment = .center
+        let text = placeholder as NSString
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 13),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: style,
+        ]
+        // Centered in the visible part of the (possibly scrolled) view, not the whole document.
+        // (A view outside any window reports an unbounded visibleRect, so clamp it to our bounds.)
+        let visible = visibleRect.intersection(bounds)
+        let area = visible.isNull || visible.isEmpty ? bounds : visible
+        let height = text.size(withAttributes: attributes).height
+        text.draw(in: NSRect(x: area.minX, y: midY - height / 2, width: area.width, height: height), withAttributes: attributes)
     }
 
     private func draw(_ scene: SceneSegment, midY: CGFloat) {
@@ -182,6 +216,7 @@ final class SceneTimelineView: NSView {
     }
 
     private func drawPlayhead() {
+        guard duration > 0 else { return }   // nothing to point at before a video is loaded
         let x = TimelineGeometry.x(forTime: playhead, pixelsPerSecond: pixelsPerSecond)
         NSColor.systemRed.setFill()
         NSRect(x: x - 1, y: 0, width: 2, height: bounds.height).fill()
@@ -191,6 +226,36 @@ final class SceneTimelineView: NSView {
         head.line(to: NSPoint(x: x, y: 8))
         head.close()
         head.fill()
+    }
+
+    // MARK: Drag and drop
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        let operation = VideoDrop.operation(for: sender.draggingPasteboard)
+        isDropTargeted = operation != []
+        return operation
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        VideoDrop.operation(for: sender.draggingPasteboard)
+    }
+
+    override func draggingExited(_ sender: (any NSDraggingInfo)?) { isDropTargeted = false }
+
+    override func prepareForDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        VideoDrop.videoURL(from: sender.draggingPasteboard) != nil
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        isDropTargeted = false
+        return acceptDrop(from: sender.draggingPasteboard)
+    }
+
+    /// Hands a dropped movie to `onDropVideo`; returns false for anything else.
+    func acceptDrop(from pasteboard: NSPasteboard) -> Bool {
+        guard let url = VideoDrop.videoURL(from: pasteboard) else { return false }
+        onDropVideo?(url)
+        return true
     }
 
     // MARK: Mouse
@@ -246,8 +311,10 @@ struct SceneTimeline: NSViewRepresentable {
     let playhead: Double
     let selectedSceneIndex: Int?
     let zoom: Double
+    let placeholder: String?
     let onScrub: (Double) -> Void
     let onSelectScene: (Int) -> Void
+    let onDropVideo: (URL) -> Void
 
     func makeNSView(context: Context) -> TimelineScrollView {
         let scrollView = TimelineScrollView()
@@ -269,7 +336,9 @@ struct SceneTimeline: NSViewRepresentable {
         timeline.zoom = zoom
         timeline.playhead = playhead
         timeline.selectedSceneIndex = selectedSceneIndex
+        timeline.placeholder = placeholder
         timeline.onScrub = onScrub
         timeline.onSelectScene = onSelectScene
+        timeline.onDropVideo = onDropVideo
     }
 }

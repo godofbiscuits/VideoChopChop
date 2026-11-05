@@ -66,31 +66,36 @@ struct ContentView: View {
     }
 
     /// Final Cut style timeline across the top: scene markers with thumbnails centered between them.
-    @ViewBuilder
+    /// Always shown, so it is a drop target even before a video is loaded; it draws its own message when empty.
     private var timeline: some View {
-        if model.scenes.isEmpty {
-            Text(model.videoURL == nil ? "Open a video to find its scene cuts."
-                 : model.isAnalyzing ? "Finding scene cuts…" : "No scenes found.")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-                .frame(height: timelineHeight)
-                .background(.quaternary.opacity(0.4))
-        } else {
-            SceneTimeline(
-                scenes: model.scenes, thumbnails: model.thumbnails, duration: model.duration,
-                playhead: model.currentSeconds, selectedSceneIndex: model.selectedSceneIndex,
-                zoom: model.timelineZoom, onScrub: model.seek(to:), onSelectScene: model.selectScene(_:)
-            )
-            .frame(height: timelineHeight)
-        }
+        SceneTimeline(
+            scenes: model.scenes, thumbnails: model.thumbnails, duration: model.duration,
+            playhead: model.currentSeconds, selectedSceneIndex: model.selectedSceneIndex,
+            zoom: model.timelineZoom, placeholder: timelinePlaceholder,
+            onScrub: model.seek(to:), onSelectScene: model.selectScene(_:), onDropVideo: openDropped(_:)
+        )
+        .frame(height: timelineHeight)
+    }
+
+    private var timelinePlaceholder: String? {
+        guard model.scenes.isEmpty else { return nil }
+        if model.videoURL == nil { return "Drop a video here, or choose Open Video, to find its scene cuts." }
+        return model.isAnalyzing ? "Finding scene cuts…" : "No scenes found."
+    }
+
+    private func openDropped(_ url: URL) {
+        Task { await model.open(url) }
     }
 
     private var detail: some View {
         VStack(spacing: 12) {
-            PlayerView(player: model.player)
+            PlayerView(player: model.player, onDropVideo: openDropped(_:))
                 .frame(minHeight: 300)
                 .overlay {
-                    if model.videoURL == nil { Text("Open a video to begin").foregroundStyle(.secondary) }
+                    if model.videoURL == nil {
+                        // Must not take hit-testing, or it would swallow drags meant for the player.
+                        Text("Drop a video here to begin").foregroundStyle(.secondary).allowsHitTesting(false)
+                    }
                 }
             statusBar
         }
