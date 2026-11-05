@@ -33,6 +33,8 @@ final class SceneTimelineView: NSView {
     var onSelectScene: ((Int) -> Void)?
     /// A movie file was dropped on the timeline.
     var onDropVideo: ((URL) -> Void)?
+    /// The user zoomed (pinch or option-scroll); carries the new zoom so the rest of the app can follow.
+    var onZoomChange: ((Double) -> Void)?
     /// Shown in the empty track (no video yet, or analysis in progress).
     var placeholder: String? { didSet { needsDisplay = true } }
     private(set) var isDropTargeted = false { didSet { needsDisplay = true } }
@@ -81,6 +83,43 @@ final class SceneTimelineView: NSView {
         pixelsPerSecond = max(fitToWindow, capped)
         setFrameSize(NSSize(width: max(visibleWidth, CGFloat(duration) * pixelsPerSecond), height: Self.totalHeight))
         needsDisplay = true
+    }
+
+    // MARK: Zoom
+
+    /// Zooming in further than this adds nothing useful.
+    static let maxZoom = 64.0
+
+    /// The lowest zoom that still changes anything: below it the timeline is already as narrow as the window.
+    var minimumZoom: Double {
+        let comfortable = TimelineGeometry.comfortablePixelsPerSecond(scenes: scenes, thumbnailWidth: naturalThumbnailWidth)
+        guard comfortable > 0, duration > 0, visibleWidth > 0 else { return 0.01 }
+        return Double(visibleWidth / CGFloat(duration) / comfortable)
+    }
+
+    /// Multiplies the zoom by `factor`, keeping the moment under `anchorX` (a point in this view) fixed on screen.
+    func zoomBy(_ factor: Double, anchoredAtX anchorX: CGFloat) {
+        guard factor > 0, pixelsPerSecond > 0 else { return }
+        let target = min(max(zoom * factor, minimumZoom), Self.maxZoom)
+        guard target != zoom else { return }
+
+        let anchorTime = TimelineGeometry.time(forX: anchorX, pixelsPerSecond: pixelsPerSecond)
+        let clip = enclosingScrollView?.contentView
+        let anchorOffset = anchorX - (clip?.bounds.minX ?? 0)
+
+        zoom = target
+        if let clip, let scrollView = enclosingScrollView {
+            let newX = TimelineGeometry.x(forTime: anchorTime, pixelsPerSecond: pixelsPerSecond)
+            let maxX = max(frame.width - clip.bounds.width, 0)
+            clip.scroll(to: NSPoint(x: min(max(newX - anchorOffset, 0), maxX), y: clip.bounds.origin.y))
+            scrollView.reflectScrolledClipView(clip)
+        }
+        onZoomChange?(target)
+    }
+
+    /// Trackpad pinch.
+    override func magnify(with event: NSEvent) {
+        zoomBy(1 + Double(event.magnification), anchoredAtX: convert(event.locationInWindow, from: nil).x)
     }
 
     private func playheadMoved() {
@@ -161,12 +200,11 @@ final class SceneTimelineView: NSView {
 
         let image = thumbnails[scene.index]
         let aspect = image.map { CGFloat($0.width) / CGFloat(max($0.height, 1)) } ?? 16.0 / 9.0
-        let size = TimelineGeometry.fittedThumbnailSize(
-            natural: CGSize(width: Self.thumbnailHeight * aspect, height: Self.thumbnailHeight), sceneWidth: x1 - x0
-        )
+        // Thumbnails never change size with zoom; only the time scale does.
+        let size = CGSize(width: Self.thumbnailHeight * aspect, height: Self.thumbnailHeight)
         let rect = TimelineGeometry.centeredThumbnailRect(startX: x0, endX: x1, thumbnailSize: size, centerY: midY)
 
-        // Clip to the scene so a thumbnail wider than a short scene never spills over its neighbours.
+        // Clip to the scene so a thumbnail wider than a narrow scene never spills over its neighbours.
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: sceneRect.insetBy(dx: 2, dy: 0)).addClip()
         if let image {
@@ -289,9 +327,15 @@ final class TimelineScrollView: NSScrollView {
         (documentView as? SceneTimelineView)?.fit(toVisibleWidth: contentSize.width)
     }
 
-    /// A plain mouse wheel only reports vertical movement; there is nothing to scroll vertically,
-    /// so use it to scroll the timeline sideways. Trackpad swipes with a horizontal part pass through unchanged.
+    /// Option + scroll zooms the time scale (for mice; trackpads can pinch), anchored at the pointer.
+    /// A plain mouse wheel only reports vertical movement and there is nothing to scroll vertically,
+    /// so it scrolls the timeline sideways. Trackpad swipes with a horizontal part pass through unchanged.
     override func scrollWheel(with event: NSEvent) {
+        if event.modifierFlags.contains(.option), let timeline = documentView as? SceneTimelineView {
+            let notch = event.hasPreciseScrollingDeltas ? 0.01 : 0.1
+            timeline.zoomBy(exp(Double(event.scrollingDeltaY) * notch), anchoredAtX: timeline.convert(event.locationInWindow, from: nil).x)
+            return
+        }
         guard event.scrollingDeltaX == 0, event.scrollingDeltaY != 0, let document = documentView else {
             super.scrollWheel(with: event)
             return
@@ -315,6 +359,7 @@ struct SceneTimeline: NSViewRepresentable {
     let onScrub: (Double) -> Void
     let onSelectScene: (Int) -> Void
     let onDropVideo: (URL) -> Void
+    let onZoomChange: (Double) -> Void
 
     func makeNSView(context: Context) -> TimelineScrollView {
         let scrollView = TimelineScrollView()
@@ -340,5 +385,6 @@ struct SceneTimeline: NSViewRepresentable {
         timeline.onScrub = onScrub
         timeline.onSelectScene = onSelectScene
         timeline.onDropVideo = onDropVideo
+        timeline.onZoomChange = onZoomChange
     }
 }

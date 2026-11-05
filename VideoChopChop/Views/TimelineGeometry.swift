@@ -52,7 +52,8 @@ nonisolated enum TimelineGeometry {
     /// The reference scene is the one at `percentile` of the sorted durations (nearest rank), not the absolute
     /// shortest: a single stray sub-second scene in a long video would otherwise set the scale for everything
     /// and make every normal scene many times wider than needed. With 10 or fewer scenes that is simply the
-    /// shortest scene. Scenes shorter than the reference get a shrunken thumbnail (see `fittedThumbnailSize`).
+    /// shortest scene. Thumbnails keep their size at every zoom, so a scene narrower than its thumbnail
+    /// simply clips it at the scene's edges.
     static func comfortablePixelsPerSecond(
         scenes: [SceneSegment], thumbnailWidth: CGFloat, sidePadding: CGFloat = 0.1, percentile: Double = 0.10
     ) -> CGFloat {
@@ -61,14 +62,6 @@ nonisolated enum TimelineGeometry {
         let rank = Int((Double(durations.count) * percentile).rounded(.up)) - 1
         let reference = durations[min(max(rank, 0), durations.count - 1)]
         return thumbnailWidth * (1 + 2 * sidePadding) / CGFloat(reference)
-    }
-
-    /// Scales a thumbnail down (keeping its aspect ratio) so it fits inside a short scene,
-    /// but never below `minScale` of its natural size; below that it is clipped to the scene instead.
-    static func fittedThumbnailSize(natural: CGSize, sceneWidth: CGFloat, margin: CGFloat = 6, minScale: CGFloat = 0.4) -> CGSize {
-        guard natural.width > 0, sceneWidth > 0 else { return natural }
-        let scale = min(max((sceneWidth - margin) / natural.width, minScale), 1)
-        return CGSize(width: natural.width * scale, height: natural.height * scale)
     }
 
     /// Seconds between ruler ticks, chosen so labels stay at least `minSpacing` points apart.

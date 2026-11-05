@@ -96,6 +96,133 @@ struct SceneTimelineViewTests {
         #expect(view.frame.width <= SceneTimelineView.maxDocumentWidth + 1)
     }
 
+    // MARK: Zoom
+
+    /// Two 20 s scenes (red then blue thumbnails), so each scene is wider than its thumbnail at the zooms below.
+    private func makeZoomableTimeline(playheadAtEnd: Bool = true) -> SceneTimelineView {
+        let view = SceneTimelineView(frame: NSRect(x: 0, y: 0, width: 400, height: SceneTimelineView.totalHeight))
+        view.fit(toVisibleWidth: 400)
+        view.duration = 40
+        view.scenes = [
+            SceneSegment(index: 0, startTime: 0, endTime: 20, startFrame: 0, endFrame: 1, cutScore: 0),
+            SceneSegment(index: 1, startTime: 20, endTime: 40, startFrame: 0, endFrame: 1, cutScore: 0.9),
+        ]
+        view.thumbnails = [0: solidImage(.red), 1: solidImage(.blue)]
+        view.playhead = playheadAtEnd ? 40 : 0   // keep the red playhead away from the red thumbnail
+        return view
+    }
+
+    /// Size in points of the red thumbnail of scene 0, measured along the spine and down the middle of the scene.
+    private func redThumbnailExtent(_ view: SceneTimelineView) throws -> (width: CGFloat, height: CGFloat) {
+        let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        func isRed(_ x: Int, _ y: Int) -> Bool {
+            guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return false }
+            return c.redComponent > 0.8 && c.greenComponent < 0.3 && c.blueComponent < 0.3
+        }
+        let sceneWidth = TimelineGeometry.x(forTime: 20, pixelsPerSecond: view.pixelsPerSecond)
+        let spineY = Int((SceneTimelineView.rulerHeight + SceneTimelineView.trackHeight / 2) * scale)
+        let centerX = Int(sceneWidth / 2 * scale)
+        let width = (4..<Int((sceneWidth - 4) * scale)).filter { isRed($0, spineY) }.count
+        let height = (0..<rep.pixelsHigh).filter { isRed(centerX, $0) }.count
+        return (CGFloat(width) / scale, CGFloat(height) / scale)
+    }
+
+    @Test func zoomingChangesTheTimeScaleButNotTheThumbnailSize() throws {
+        let view = makeZoomableTimeline()
+        let before = try redThumbnailExtent(view)
+        let pixelsPerSecondBefore = view.pixelsPerSecond
+
+        view.zoomBy(2, anchoredAtX: 100)
+        #expect(view.pixelsPerSecond > pixelsPerSecondBefore, "zooming in should widen the time scale")
+        let after = try redThumbnailExtent(view)
+
+        // The thumbnail is the same size (about 92 x 52 pt, less its border) at both zooms.
+        #expect(abs(after.width - before.width) <= 2, "width \(before.width) -> \(after.width)")
+        #expect(abs(after.height - before.height) <= 2, "height \(before.height) -> \(after.height)")
+        #expect(abs(before.width - thumbnailWidth) < 4 && abs(before.height - SceneTimelineView.thumbnailHeight) < 4)
+    }
+
+    @Test func narrowScenesClipTheThumbnailInsteadOfShrinkingIt() throws {
+        let view = makeZoomableTimeline()
+        view.zoomBy(0.001, anchoredAtX: 0)    // all the way out: 20 s scenes are now only 200 pt wide
+        view.zoom = view.minimumZoom
+        let wide = try redThumbnailExtent(view)
+        // Squeeze each scene to ~60 pt, narrower than the 92 pt thumbnail, by narrowing the window and zooming out fully.
+        view.fit(toVisibleWidth: 120)
+        view.zoom = view.minimumZoom
+        let narrow = try redThumbnailExtent(view)
+        #expect(abs(narrow.height - wide.height) <= 2, "height \(wide.height) -> \(narrow.height)")
+        #expect(narrow.width < wide.width, "the thumbnail is clipped, not scaled")
+    }
+
+    @Test func zoomIsAnchoredOnThePointer() throws {
+        let scrollView = TimelineScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: SceneTimelineView.totalHeight + 18))
+        let timeline = SceneTimelineView(frame: NSRect(x: 0, y: 0, width: 300, height: SceneTimelineView.totalHeight))
+        scrollView.documentView = timeline
+        timeline.duration = 6
+        timeline.scenes = (0..<6).map {
+            SceneSegment(index: $0, startTime: Double($0), endTime: Double($0 + 1), startFrame: 0, endFrame: 1, cutScore: 0)
+        }
+        timeline.thumbnails = Dictionary(uniqueKeysWithValues: (0..<6).map { ($0, solidImage(.red)) })
+        scrollView.layoutSubtreeIfNeeded()
+        scrollView.contentView.scroll(to: NSPoint(x: 100, y: 0))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+
+        let anchorX: CGFloat = 150                                   // document coordinates; 50 pt into the window
+        let anchorTime = TimelineGeometry.time(forX: anchorX, pixelsPerSecond: timeline.pixelsPerSecond)
+        timeline.zoomBy(2, anchoredAtX: anchorX)
+
+        let newOrigin = scrollView.contentView.bounds.origin.x
+        let timeUnderPointer = TimelineGeometry.time(forX: newOrigin + 50, pixelsPerSecond: timeline.pixelsPerSecond)
+        #expect(abs(timeUnderPointer - anchorTime) < 0.01, "\(anchorTime) s drifted to \(timeUnderPointer) s")
+    }
+
+    @Test func zoomIsClampedAndReported() {
+        let view = makeZoomableTimeline()
+        var reported: [Double] = []
+        view.onZoomChange = { reported.append($0) }
+
+        view.zoomBy(1_000_000, anchoredAtX: 0)
+        #expect(view.zoom == SceneTimelineView.maxZoom)
+        view.zoomBy(0.000_001, anchoredAtX: 0)
+        #expect(view.zoom == view.minimumZoom)
+        #expect(view.frame.width == 400, "fully zoomed out the timeline is exactly the window wide")
+        #expect(reported == [SceneTimelineView.maxZoom, view.minimumZoom])
+
+        // Already at the limit: nothing changes and nothing is reported.
+        view.zoomBy(0.5, anchoredAtX: 0)
+        #expect(reported.count == 2)
+    }
+
+    @Test func optionScrollZoomsAndPlainScrollDoesNot() throws {
+        let scrollView = TimelineScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: SceneTimelineView.totalHeight + 18))
+        let timeline = SceneTimelineView(frame: NSRect(x: 0, y: 0, width: 300, height: SceneTimelineView.totalHeight))
+        scrollView.documentView = timeline
+        timeline.duration = 6
+        timeline.scenes = (0..<6).map {
+            SceneSegment(index: $0, startTime: Double($0), endTime: Double($0 + 1), startFrame: 0, endFrame: 1, cutScore: 0)
+        }
+        timeline.thumbnails = [0: solidImage(.red)]
+        scrollView.layoutSubtreeIfNeeded()
+
+        func scrollEvent(_ delta: Int32, option: Bool) throws -> NSEvent {
+            let cgEvent = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0))
+            if option { cgEvent.flags = .maskAlternate }
+            return try #require(NSEvent(cgEvent: cgEvent))
+        }
+        let start = timeline.zoom
+        scrollView.scrollWheel(with: try scrollEvent(-80, option: false))
+        #expect(timeline.zoom == start, "plain scrolling must not zoom")
+
+        scrollView.scrollWheel(with: try scrollEvent(40, option: true))
+        #expect(timeline.zoom > start, "option + scroll up zooms in")
+        let zoomedIn = timeline.zoom
+        scrollView.scrollWheel(with: try scrollEvent(-40, option: true))
+        #expect(timeline.zoom < zoomedIn, "option + scroll down zooms out")
+    }
+
     @Test func scrollViewScrollsAndAMouseWheelMovesItSideways() throws {
         let scrollView = TimelineScrollView(frame: NSRect(x: 0, y: 0, width: 300, height: SceneTimelineView.totalHeight + 18))
         scrollView.hasHorizontalScroller = true

@@ -94,16 +94,6 @@ struct TimelineGeometryTests {
         #expect(TimelineGeometry.comfortablePixelsPerSecond(scenes: scenes, thumbnailWidth: 0) == 0)
     }
 
-    @Test func shortScenesShrinkTheThumbnailDownToAFloor() {
-        let natural = CGSize(width: 92, height: 52)
-        // Plenty of room: unchanged. Short scene: scaled to fit with a margin. Tiny scene: floored at 40%.
-        #expect(TimelineGeometry.fittedThumbnailSize(natural: natural, sceneWidth: 300) == natural)
-        let fitted = TimelineGeometry.fittedThumbnailSize(natural: natural, sceneWidth: 56)
-        #expect(abs(fitted.width - 50) < 0.001 && abs(fitted.width / fitted.height - 92.0 / 52.0) < 0.001)
-        let floored = TimelineGeometry.fittedThumbnailSize(natural: natural, sceneWidth: 10)
-        #expect(abs(floored.width - 36.8) < 0.001)
-    }
-
     @Test func tickIntervalKeepsLabelsApart() {
         // Fully zoomed out (about 5 pt/s) ticks must be sparse; zoomed in they get dense.
         #expect(TimelineGeometry.tickInterval(pixelsPerSecond: 5) == 15)

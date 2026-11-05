@@ -34,7 +34,7 @@ struct ContentView: View {
                     // Zoom is exponential: the slider is in powers of two around the comfortable scale.
                     Slider(
                         value: Binding(get: { log2(model.timelineZoom) }, set: { model.timelineZoom = pow(2, $0) }),
-                        in: -3...4
+                        in: -6...6
                     )
                     .frame(width: 120)
                         .accessibilityLabel("Timeline zoom")
@@ -72,7 +72,8 @@ struct ContentView: View {
             scenes: model.scenes, thumbnails: model.thumbnails, duration: model.duration,
             playhead: model.currentSeconds, selectedSceneIndex: model.selectedSceneIndex,
             zoom: model.timelineZoom, placeholder: timelinePlaceholder,
-            onScrub: model.seek(to:), onSelectScene: model.selectScene(_:), onDropVideo: openDropped(_:)
+            onScrub: model.seek(to:), onSelectScene: model.selectScene(_:), onDropVideo: openDropped(_:),
+            onZoomChange: { model.timelineZoom = $0 }
         )
         .frame(height: timelineHeight)
     }
