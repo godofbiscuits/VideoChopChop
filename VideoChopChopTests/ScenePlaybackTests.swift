@@ -8,6 +8,8 @@ import Foundation
 import Testing
 @testable import VideoChopChop
 
+private final class ModelFixtureToken {}
+
 @MainActor
 struct ScenePlaybackTests {
     /// Waits (up to `timeout` seconds) for a condition on the main actor.
@@ -61,6 +63,44 @@ struct ScenePlaybackTests {
         let cued = await wait(timeout: 3) { abs(model.player.currentTime().seconds - 2.0) < 0.1 }
         #expect(cued, "at \(model.player.currentTime().seconds)")
         #expect(model.player.timeControlStatus == .paused)
+    }
+
+    @Test func openingAnMKVConvertsItAndFindsItsScenes() async throws {
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent("converted-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let bundle = Bundle(for: MPSPass.self).bundleURL.appendingPathComponent("Contents/PlugIns")
+        let fixtureURL = try #require(
+            Bundle(for: ModelFixtureToken.self).url(forResource: "three-scenes-vp9-opus", withExtension: "mkv"),
+            "fixture missing (looked near \(bundle.path))"
+        )
+
+        let model = VideoModel(converter: MediaConverter(cacheDirectory: cache))
+        await model.open(fixtureURL)
+
+        #expect(!model.isConverting)
+        #expect(model.errorMessage == nil, "\(model.errorMessage ?? "")")
+        #expect(model.sourceName == "three-scenes-vp9-opus.mkv", "the original name is what the user sees")
+        #expect(model.videoURL?.pathExtension == "mp4")
+        let found = await wait(timeout: 15) { model.scenes.count == 3 }
+        #expect(found, "scenes: \(model.scenes.count)")
+        #expect(abs(model.duration - 3.0) < 0.2)
+    }
+
+    @Test func aConversionFailureIsReportedAndLeavesNothingHalfOpen() async throws {
+        let junk = FileManager.default.temporaryDirectory.appendingPathComponent("junk-\(UUID().uuidString).mkv")
+        try Data("not a video".utf8).write(to: junk)
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent("converted-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: junk)
+            try? FileManager.default.removeItem(at: cache)
+        }
+        let model = VideoModel(converter: MediaConverter(cacheDirectory: cache))
+        await model.open(junk)
+
+        #expect(model.errorMessage?.isEmpty == false)
+        #expect(model.videoURL == nil)
+        #expect(!model.isConverting)
+        #expect(model.scenes.isEmpty)
     }
 
     @Test func thumbnailsAreGeneratedForEveryScene() async throws {

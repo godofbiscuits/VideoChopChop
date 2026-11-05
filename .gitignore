@@ -3,3 +3,6 @@ Vendor/
 xcuserdata/
 .swiftpm/
 Reference/*.mp4
+VideoChopChop/Helpers/ffmpeg
+VideoChopChop/*.mkv
+Reference/*.mkv

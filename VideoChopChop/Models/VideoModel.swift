@@ -13,6 +13,12 @@ final class VideoModel {
     private(set) var scenes: [SceneSegment] = []
     private(set) var duration = 0.0
 
+    /// The file the user chose. `videoURL` is what is actually played and analyzed: the same file, or a
+    /// converted MP4 when macOS can't read the original container (MKV, WebM).
+    private(set) var sourceName: String?
+    private(set) var isConverting = false
+    private(set) var conversionProgress = 0.0
+
     private(set) var isAnalyzing = false
     private(set) var analysisProgress = 0.0
     private(set) var isExporting = false
@@ -50,7 +56,12 @@ final class VideoModel {
 
     var canExportJXL: Bool { FrameEncoders.jpegXL(jxl) != nil }
 
-    init() {
+    private let converter: MediaConverter
+    private var conversionTask: Task<URL, any Error>?
+    @ObservationIgnored private var openGeneration = 0
+
+    init(converter: MediaConverter = MediaConverter()) {
+        self.converter = converter
         // AVPlayer's periodic observer also fires on seeks, so the playhead follows scrubbing too.
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] time in
             MainActor.assumeIsolated { self?.currentSeconds = time.seconds }
@@ -59,18 +70,55 @@ final class VideoModel {
 
     // MARK: Opening
 
-    func open(_ url: URL) async {
+    /// Opens a video. Containers macOS can't read (MKV, WebM) are first converted to a cached MP4,
+    /// which is lossless wherever the codecs allow it.
+    func open(_ chosen: URL) async {
+        openGeneration += 1
+        let generation = openGeneration
         analysisTask?.cancel()
+        conversionTask?.cancel()
         scopedURL?.stopAccessingSecurityScopedResource()
-        scopedURL = url.startAccessingSecurityScopedResource() ? url : nil
+        scopedURL = chosen.startAccessingSecurityScopedResource() ? chosen : nil
 
-        videoURL = url
         thumbnailTask?.cancel()
         thumbnails = [:]
         selectedSceneIndex = nil
         scenes = []
         statusMessage = nil
         errorMessage = nil
+        isConverting = false
+        sourceName = chosen.lastPathComponent
+
+        let url: URL
+        if await MediaConverter.avFoundationCanRead(chosen) {
+            url = chosen
+        } else {
+            isConverting = true
+            conversionProgress = 0
+            statusMessage = "Converting \(chosen.lastPathComponent)…"
+            let converter = converter
+            let task = Task {
+                try await converter.prepare(chosen) { fraction in
+                    Task { @MainActor [weak self] in self?.conversionProgress = fraction }
+                }
+            }
+            conversionTask = task
+            do {
+                url = try await task.value
+            } catch {
+                guard generation == openGeneration else { return }   // superseded by another open
+                isConverting = false
+                statusMessage = nil
+                videoURL = nil
+                errorMessage = (error as? CancellationError) == nil ? error.localizedDescription : nil
+                return
+            }
+            isConverting = false
+            statusMessage = nil
+        }
+        guard generation == openGeneration else { return }
+
+        videoURL = url
         let asset = AVURLAsset(url: url)
         duration = (try? await asset.load(.duration).seconds) ?? 0
         let item = AVPlayerItem(asset: asset)
@@ -215,7 +263,7 @@ final class VideoModel {
         options.chain = filters.chain
         do {
             let manifest = try await FrameExporter().export(
-                url: url, scenes: scenes, to: directory, options: options, encoder: encoder
+                url: url, scenes: scenes, to: directory, options: options, encoder: encoder, sourceName: sourceName
             ) { fraction in
                 Task { @MainActor in self.exportProgress = fraction }
             }

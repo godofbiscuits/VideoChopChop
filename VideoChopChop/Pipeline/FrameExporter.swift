@@ -54,6 +54,8 @@ actor FrameExporter {
         to directory: URL,
         options: ExportOptions,
         encoder: any FrameEncoder,
+        /// Name recorded in the manifest; defaults to the file's own name. (For a converted MKV this is the original.)
+        sourceName: String? = nil,
         progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> ExportManifest {
         let wanted = Self.wantedFrames(scenes: scenes, selection: options.selection)
@@ -97,7 +99,7 @@ actor FrameExporter {
         }
 
         let manifest = ExportManifest(
-            source: url.lastPathComponent, frameRate: source.frameRate, fileExtension: encoder.fileExtension,
+            source: sourceName ?? url.lastPathComponent, frameRate: source.frameRate, fileExtension: encoder.fileExtension,
             scenes: scenes, frames: frames
         )
         let encoderJSON = JSONEncoder()

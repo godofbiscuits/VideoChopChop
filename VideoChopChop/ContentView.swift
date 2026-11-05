@@ -80,6 +80,7 @@ struct ContentView: View {
 
     private var timelinePlaceholder: String? {
         guard model.scenes.isEmpty else { return nil }
+        if model.isConverting { return "Converting \(model.sourceName ?? "video")…" }
         if model.videoURL == nil { return "Drop a video here, or choose Open Video, to find its scene cuts." }
         return model.isAnalyzing ? "Finding scene cuts…" : "No scenes found."
     }
@@ -105,7 +106,10 @@ struct ContentView: View {
 
     @ViewBuilder
     private var statusBar: some View {
-        if model.isAnalyzing {
+        if model.isConverting {
+            // Containers macOS can't read (MKV, WebM) are converted first; this is usually a lossless rewrap.
+            ProgressView("Converting \(model.sourceName ?? "video") for playback…", value: model.conversionProgress)
+        } else if model.isAnalyzing {
             ProgressView("Finding scene cuts…", value: model.analysisProgress)
         } else if model.isExporting {
             ProgressView("Exporting frames…", value: model.exportProgress)
