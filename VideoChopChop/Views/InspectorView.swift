@@ -7,7 +7,7 @@ import SwiftUI
 
 struct InspectorView: View {
     @Bindable var model: VideoModel
-    let onExport: () -> Void
+    let onIngest: () -> Void
 
     var body: some View {
         Form {
@@ -51,21 +51,42 @@ struct InspectorView: View {
                 Toggle("Sobel edges", isOn: $model.filters.mpsSobelEnabled)
             }
 
-            Section("Export (JPEG XL)") {
-                Toggle("One frame set per scene (first / middle / last)", isOn: $model.representativeOnly)
-                if !model.representativeOnly {
-                    Stepper("Every \(model.exportEveryNth) frame\(model.exportEveryNth == 1 ? "" : "s")",
-                            value: $model.exportEveryNth, in: 1...300)
+            Section("Ingest (JPEG XL images)") {
+                // The settings are fixed while an ingest runs; the Cancel button below stays usable.
+                Group {
+                    Picker("Vertical resolution", selection: $model.ingestHeight) {
+                        ForEach(VideoModel.heightChoices, id: \.self) { height in
+                            Text(height == 0 ? "Original size" : "\(height) px").tag(height)
+                        }
+                    }
+                    Stepper("Every \(model.ingestFrameStep) frame\(model.ingestFrameStep == 1 ? "" : "s")",
+                            value: $model.ingestFrameStep, in: 1...300)
+                    Toggle("Lossless", isOn: $model.jxl.lossless)
+                    if !model.jxl.lossless {
+                        // Distance 1.0 is "visually lossless"; the default 1.5 is ~7.6x smaller than lossless
+                        // with a mean colour error far below visible (measured on real frames).
+                        slider("Distance", Binding(get: { Double(model.jxl.distance) }, set: { model.jxl.distance = Float($0) }), 0.1...5)
+                        Text("Distance \(model.jxl.distance.formatted(.number.precision(.fractionLength(1)))): lower is closer to the original, higher is smaller.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Stepper("Effort \(model.jxl.effort)", value: $model.jxl.effort, in: 1...9)
                 }
-                Toggle("Lossless", isOn: $model.jxl.lossless)
-                if !model.jxl.lossless {
-                    slider("Distance", Binding(get: { Double(model.jxl.distance) }, set: { model.jxl.distance = Float($0) }), 0.1...5)
+                .disabled(model.isIngesting)
+                Text("Images are named by absolute frame number, one folder per scene.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if model.isIngesting {
+                    Button("Cancel Ingest", role: .cancel, action: model.cancelWork)
+                } else {
+                    Button("Ingest…", action: onIngest)
+                        .disabled(model.scenes.isEmpty || model.isAnalyzing || model.isComputingStatistics)
                 }
-                Stepper("Effort \(model.jxl.effort)", value: $model.jxl.effort, in: 1...9)
-                Button("Export…", action: onExport)
-                    .disabled(model.scenes.isEmpty || model.isExporting)
+                if model.ingestStatistics != nil {
+                    Button("Show Statistics") { model.showingStatistics = true }
+                }
                 if !model.canExportJXL {
-                    Text("JPEG XL export needs the JXLKit package added to the app target.")
+                    Text("JPEG XL needs the JXLKit package added to the app target.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

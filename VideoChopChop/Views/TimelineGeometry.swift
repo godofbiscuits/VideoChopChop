@@ -35,6 +35,25 @@ nonisolated enum TimelineGeometry {
         return scenes.first { time >= $0.startTime && time < $0.endTime }?.index
     }
 
+    /// The scenes that overlap the horizontal span `minX...maxX`, found by binary search (scenes are in time order),
+    /// so painting a screenful costs the same whether the video has ten scenes or ten thousand.
+    static func visibleSceneIndices(scenes: [SceneSegment], minX: CGFloat, maxX: CGFloat, pixelsPerSecond: CGFloat) -> Range<Int> {
+        guard pixelsPerSecond > 0, !scenes.isEmpty, maxX >= minX else { return 0..<0 }
+        let minTime = Double(minX / pixelsPerSecond), maxTime = Double(maxX / pixelsPerSecond)
+        var low = 0, high = scenes.count
+        while low < high {                                   // first scene that ends after minTime
+            let mid = (low + high) / 2
+            if scenes[mid].endTime > minTime { high = mid } else { low = mid + 1 }
+        }
+        let first = low
+        high = scenes.count
+        while low < high {                                   // first scene that starts at or after maxTime
+            let mid = (low + high) / 2
+            if scenes[mid].startTime >= maxTime { high = mid } else { low = mid + 1 }
+        }
+        return first..<low
+    }
+
     /// A thumbnail frame centered horizontally between a scene's start and end markers
     /// and vertically on the timeline's spine.
     static func centeredThumbnailRect(startX: CGFloat, endX: CGFloat, thumbnailSize: CGSize, centerY: CGFloat) -> CGRect {

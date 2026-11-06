@@ -108,13 +108,14 @@ struct ScanProgressBar: NSViewRepresentable {
     }
 }
 
-/// "Finding scene cuts… Frame N of M" over a bar whose head shows the movie's timestamp.
+/// "<title> Frame N of M" over a bar whose head shows the movie's timestamp.
 struct ScanProgressView: View {
+    var title = "Finding scene cuts…"
     let progress: AnalysisProgress
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Finding scene cuts…  \(ScanProgressLayout.frameText(frame: progress.frame, totalFrames: progress.totalFrames))")
+            Text("\(title)  \(ScanProgressLayout.frameText(frame: progress.frame, totalFrames: progress.totalFrames))")
                 .monospacedDigit()
             ScanProgressBar(fraction: progress.fraction, label: ScanProgressLayout.clock(progress.seconds))
                 .frame(height: ScanProgressNSView.height)

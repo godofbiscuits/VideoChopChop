@@ -18,13 +18,32 @@ final class SceneTimelineView: NSView {
     /// Widest the timeline will ever be, in points, however many short scenes a long video has.
     static let maxDocumentWidth: CGFloat = 120_000
 
-    var scenes: [SceneSegment] = [] { didSet { relayout() } }
-    var thumbnails: [Int: CGImage] = [:] { didSet { relayout() } }
-    var duration = 0.0 { didSet { relayout() } }
+    // SwiftUI pushes every property on every update (about 30 times a second during playback), so each setter
+    // does nothing unless the value really changed. In particular the O(n log n) scale computation only runs
+    // when the scenes (or the thumbnail shape) change, never because the playhead moved.
+    var scenes: [SceneSegment] = [] {
+        didSet {
+            guard scenes != oldValue else { return }
+            recomputeComfortableScale()
+            relayout()
+        }
+    }
+    var thumbnails: [Int: CGImage] = [:] {
+        didSet {
+            guard thumbnails.count != oldValue.count else { return }
+            if naturalThumbnailWidth != layoutThumbnailWidth {   // the first thumbnail tells us the aspect ratio
+                recomputeComfortableScale()
+                relayout()
+            } else {
+                needsDisplay = true
+            }
+        }
+    }
+    var duration = 0.0 { didSet { if duration != oldValue { relayout() } } }
     /// Multiplies the comfortable scale (smallest typical scene = thumbnail + 10% each side). Below 1 zooms out,
     /// but the timeline is never narrower than the window.
-    var zoom = 1.0 { didSet { relayout() } }
-    var playhead = 0.0 { didSet { playheadMoved() } }
+    var zoom = 1.0 { didSet { if zoom != oldValue { relayout() } } }
+    var playhead = 0.0 { didSet { if playhead != oldValue { playheadMoved(from: oldValue) } } }
     var selectedSceneIndex: Int? { didSet { needsDisplay = true } }
 
     /// Click or drag in the ruler: scrub to a time.
@@ -40,6 +59,11 @@ final class SceneTimelineView: NSView {
     private(set) var isDropTargeted = false { didSet { needsDisplay = true } }
 
     private(set) var pixelsPerSecond: CGFloat = 0
+    /// Cached `TimelineGeometry.comfortablePixelsPerSecond` for the current scenes and thumbnail width.
+    private var comfortableScale: CGFloat = 0
+    private var layoutThumbnailWidth: CGFloat = 0
+    /// How many times the layout has been recomputed (lets tests prove idle updates are free).
+    private(set) var layoutPassCount = 0
     private var visibleWidth: CGFloat = 0
     private var isScrubbing = false
 
@@ -70,7 +94,13 @@ final class SceneTimelineView: NSView {
         return Self.thumbnailHeight * aspect
     }
 
+    private func recomputeComfortableScale() {
+        layoutThumbnailWidth = naturalThumbnailWidth
+        comfortableScale = TimelineGeometry.comfortablePixelsPerSecond(scenes: scenes, thumbnailWidth: layoutThumbnailWidth)
+    }
+
     private func relayout() {
+        layoutPassCount += 1
         guard duration > 0 else {
             pixelsPerSecond = 0
             setFrameSize(NSSize(width: visibleWidth, height: Self.totalHeight))
@@ -78,8 +108,7 @@ final class SceneTimelineView: NSView {
             return
         }
         let fitToWindow = visibleWidth / CGFloat(duration)
-        let comfortable = TimelineGeometry.comfortablePixelsPerSecond(scenes: scenes, thumbnailWidth: naturalThumbnailWidth)
-        let capped = min(comfortable * CGFloat(zoom), Self.maxDocumentWidth / CGFloat(duration))
+        let capped = min(comfortableScale * CGFloat(zoom), Self.maxDocumentWidth / CGFloat(duration))
         pixelsPerSecond = max(fitToWindow, capped)
         setFrameSize(NSSize(width: max(visibleWidth, CGFloat(duration) * pixelsPerSecond), height: Self.totalHeight))
         needsDisplay = true
@@ -92,9 +121,8 @@ final class SceneTimelineView: NSView {
 
     /// The lowest zoom that still changes anything: below it the timeline is already as narrow as the window.
     var minimumZoom: Double {
-        let comfortable = TimelineGeometry.comfortablePixelsPerSecond(scenes: scenes, thumbnailWidth: naturalThumbnailWidth)
-        guard comfortable > 0, duration > 0, visibleWidth > 0 else { return 0.01 }
-        return Double(visibleWidth / CGFloat(duration) / comfortable)
+        guard comfortableScale > 0, duration > 0, visibleWidth > 0 else { return 0.01 }
+        return Double(visibleWidth / CGFloat(duration) / comfortableScale)
     }
 
     /// Multiplies the zoom by `factor`, keeping the moment under `anchorX` (a point in this view) fixed on screen.
@@ -122,8 +150,12 @@ final class SceneTimelineView: NSView {
         zoomBy(1 + Double(event.magnification), anchoredAtX: convert(event.locationInWindow, from: nil).x)
     }
 
-    private func playheadMoved() {
-        needsDisplay = true
+    private func playheadMoved(from previous: Double) {
+        // Repaint only the strips where the playhead was and where it is now, not the whole timeline.
+        for time in [previous, playhead] {
+            let x = TimelineGeometry.x(forTime: time, pixelsPerSecond: pixelsPerSecond)
+            setNeedsDisplay(NSRect(x: x - 7, y: 0, width: 14, height: bounds.height))
+        }
         guard !isScrubbing, pixelsPerSecond > 0 else { return }
         let x = TimelineGeometry.x(forTime: playhead, pixelsPerSecond: pixelsPerSecond)
         if x < visibleRect.minX + 8 || x > visibleRect.maxX - 8 {
@@ -149,12 +181,16 @@ final class SceneTimelineView: NSView {
             NSRect(x: 0, y: midY - 0.5, width: bounds.width, height: 1).fill()
         }
 
-        for scene in scenes { draw(scene, midY: midY) }
+        // Only the scenes on screen are drawn, however many there are (a little slack for the 1 pt markers).
+        let onScreen = scenes[TimelineGeometry.visibleSceneIndices(
+            scenes: scenes, minX: dirtyRect.minX - 2, maxX: dirtyRect.maxX + 2, pixelsPerSecond: pixelsPerSecond
+        )]
+        for scene in onScreen { draw(scene, midY: midY) }
         drawPlaceholder(midY: midY)
 
         // Marker at the start of every scene.
         NSColor.systemYellow.setFill()
-        for scene in scenes {
+        for scene in onScreen {
             let x = TimelineGeometry.x(forTime: scene.startTime, pixelsPerSecond: pixelsPerSecond)
             NSRect(x: x - 0.5, y: 0, width: 1, height: bounds.height).fill()
         }

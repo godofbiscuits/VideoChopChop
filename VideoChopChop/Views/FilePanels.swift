@@ -19,14 +19,23 @@ enum FilePanels {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
-    static func chooseExportFolder() -> URL? {
+    private static let lastIngestFolderKey = "lastIngestParentFolder"
+
+    /// Picks the folder an ingest's movie folder will be created in. The panel opens where you last chose.
+    static func chooseIngestFolder(defaults: UserDefaults = .standard) -> URL? {
         let panel = NSOpenPanel()
-        panel.title = "Export Frames"
-        panel.prompt = "Export Here"
+        panel.title = "Choose where to put the ingested frames"
+        panel.message = "A folder named after the movie will be created inside the one you choose."
+        panel.prompt = "Ingest Here"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        return panel.runModal() == .OK ? panel.url : nil
+        if let last = defaults.string(forKey: lastIngestFolderKey) {
+            panel.directoryURL = URL(fileURLWithPath: last, isDirectory: true)
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        defaults.set(url.path, forKey: lastIngestFolderKey)
+        return url
     }
 }

@@ -15,9 +15,12 @@ nonisolated protocol FrameEncoder: Sendable {
     func encode(rgba: [UInt8], width: Int, height: Int) throws -> Data
 }
 
+/// Defaults are lossy: measured on real 854x480 frames, distance 1.5 is ~7.6x smaller than lossless with a
+/// mean OKLab error of ~0.009 (well under one just-noticeable difference). Effort above 3 saved almost nothing
+/// for 2-3x the encode time.
 nonisolated struct JXLSettings: Sendable, Equatable {
-    var lossless = true
-    var distance: Float = 1.0
+    var lossless = false
+    var distance: Float = 1.5
     var effort = 3
 }
 

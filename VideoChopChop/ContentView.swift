@@ -21,7 +21,7 @@ struct ContentView: View {
             detail
         }
         .inspector(isPresented: $showingInspector) {
-            InspectorView(model: model) { exportToChosenFolder() }
+            InspectorView(model: model) { ingestIntoChosenFolder() }
                 .inspectorColumnWidth(min: 260, ideal: 300, max: 400)
         }
         .toolbar {
@@ -45,6 +45,11 @@ struct ContentView: View {
                 Button("Inspector", systemImage: "sidebar.right") { showingInspector.toggle() }
             }
         }
+        .sheet(isPresented: $model.showingStatistics) {
+            if let statistics = model.ingestStatistics {
+                IngestStatsView(statistics: statistics, folder: model.ingestFolder, sourceName: model.sourceName)
+            }
+        }
         .alert("Something went wrong", isPresented: Binding(
             get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } }
         )) {
@@ -60,9 +65,9 @@ struct ContentView: View {
         Task { await model.open(url) }
     }
 
-    private func exportToChosenFolder() {
-        guard let url = FilePanels.chooseExportFolder() else { return }
-        Task { await model.export(to: url) }
+    private func ingestIntoChosenFolder() {
+        guard let url = FilePanels.chooseIngestFolder() else { return }
+        model.beginIngest(into: url)
     }
 
     /// Final Cut style timeline across the top: scene markers with thumbnails centered between them.
@@ -104,8 +109,18 @@ struct ContentView: View {
         .padding()
     }
 
-    @ViewBuilder
     private var statusBar: some View {
+        HStack(alignment: .bottom) {
+            progressContent.frame(maxWidth: .infinity, alignment: .leading)
+            if model.isBusy {
+                Button("Cancel") { model.cancelWork() }
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var progressContent: some View {
         if model.isConverting {
             // Containers macOS can't read (MKV, WebM) are converted first; this is usually a lossless rewrap.
             ProgressView("Converting \(model.sourceName ?? "video") for playback…", value: model.conversionProgress)
@@ -115,8 +130,14 @@ struct ContentView: View {
             } else {
                 ProgressView("Finding scene cuts…")   // until the first frame has been read
             }
-        } else if model.isExporting {
-            ProgressView("Exporting frames…", value: model.exportProgress)
+        } else if model.isIngesting {
+            if let progress = model.ingestProgress {
+                ScanProgressView(title: "Writing images…", progress: progress)
+            } else {
+                ProgressView("Writing images…")   // until the first frame has been written
+            }
+        } else if model.isComputingStatistics {
+            ProgressView("Computing statistics from the images…")
         } else if let status = model.statusMessage {
             Text(status).font(.callout).foregroundStyle(.secondary)
         }

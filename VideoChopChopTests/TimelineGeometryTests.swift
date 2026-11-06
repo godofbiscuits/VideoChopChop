@@ -37,6 +37,21 @@ struct TimelineGeometryTests {
         #expect(TimelineGeometry.sceneIndex(atX: 400, scenes: scenes, pixelsPerSecond: 50) == nil)
     }
 
+    @Test func findsJustTheScenesOnScreen() {
+        // 1,000 scenes of 2 s each: scene i spans [2i, 2i + 2) seconds.
+        let scenes = (0..<1000).map {
+            SceneSegment(index: $0, startTime: Double($0) * 2, endTime: Double($0) * 2 + 2, startFrame: $0 * 60, endFrame: $0 * 60 + 60, cutScore: 0)
+        }
+        // At 50 pt/s a scene is 100 pt wide. A window from x = 1,050 to 1,350 overlaps scenes 10 (1000-1100), 11, 12, 13 (1300-1400).
+        #expect(TimelineGeometry.visibleSceneIndices(scenes: scenes, minX: 1050, maxX: 1350, pixelsPerSecond: 50) == 10..<14)
+        // Touching a boundary does not pull in the neighbour.
+        #expect(TimelineGeometry.visibleSceneIndices(scenes: scenes, minX: 100, maxX: 200, pixelsPerSecond: 50) == 1..<2)
+        #expect(TimelineGeometry.visibleSceneIndices(scenes: scenes, minX: 0, maxX: 100_000, pixelsPerSecond: 50) == 0..<1000)
+        #expect(TimelineGeometry.visibleSceneIndices(scenes: scenes, minX: 500_000, maxX: 600_000, pixelsPerSecond: 50).isEmpty)
+        #expect(TimelineGeometry.visibleSceneIndices(scenes: [], minX: 0, maxX: 100, pixelsPerSecond: 50).isEmpty)
+        #expect(TimelineGeometry.visibleSceneIndices(scenes: scenes, minX: 0, maxX: 100, pixelsPerSecond: 0).isEmpty)
+    }
+
     @Test func thumbnailIsCenteredBetweenMarkers() {
         let rect = TimelineGeometry.centeredThumbnailRect(
             startX: 100, endX: 300, thumbnailSize: CGSize(width: 80, height: 45), centerY: 60

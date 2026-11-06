@@ -22,16 +22,37 @@ final class VideoModel {
     private(set) var isAnalyzing = false
     /// Nil until the scan reports its first position (and again once it is finished).
     private(set) var analysisProgress: AnalysisProgress?
-    private(set) var isExporting = false
-    private(set) var exportProgress = 0.0
     private(set) var statusMessage: String?
     var errorMessage: String?
 
+    // MARK: Ingest state
+    private(set) var isIngesting = false
+    /// Nil until the first image has been reported (and again once the ingest is finished).
+    private(set) var ingestProgress: AnalysisProgress?
+    /// The folder the last ingest created, and the statistics computed from the images in it.
+    private(set) var ingestFolder: URL?
+    private(set) var ingestStatistics: IngestStatistics?
+    private(set) var isComputingStatistics = false
+    var showingStatistics = false
+
     var filters = FilterSettings() { didSet { if filters != oldValue { scheduleCompositionUpdate() } } }
     var sceneCutConfig = SceneCutConfig()
-    var exportEveryNth = 1
-    var representativeOnly = false
-    var jxl = JXLSettings()
+
+    // MARK: Ingest settings (chosen before an ingest, remembered between launches)
+    /// Vertical resolution of the written images; 0 means keep the original size.
+    var ingestHeight: Int { didSet { defaults.set(ingestHeight, forKey: Self.heightKey) } }
+    /// Write every Nth frame (1 = every frame). Images are named by absolute frame number either way.
+    var ingestFrameStep: Int { didSet { defaults.set(ingestFrameStep, forKey: Self.stepKey) } }
+    var jxl: JXLSettings {
+        didSet {
+            defaults.set(jxl.lossless, forKey: Self.losslessKey)
+            defaults.set(Double(jxl.distance), forKey: Self.distanceKey)
+            defaults.set(jxl.effort, forKey: Self.effortKey)
+        }
+    }
+    static let heightChoices = [240, 360, 480, 720, 1080, 0]
+    private static let heightKey = "ingest.height", stepKey = "ingest.frameStep"
+    private static let losslessKey = "ingest.lossless", distanceKey = "ingest.distance", effortKey = "ingest.effort"
 
     /// The scene the player is cued to. While set, playback stops at the end of that scene
     /// (the start of the next one) via `AVPlayerItem.forwardPlaybackEndTime`.
@@ -58,11 +79,21 @@ final class VideoModel {
     var canExportJXL: Bool { FrameEncoders.jpegXL(jxl) != nil }
 
     private let converter: MediaConverter
+    private let defaults: UserDefaults
     private var conversionTask: Task<URL, any Error>?
+    @ObservationIgnored private var ingestTask: Task<Void, Never>?
     @ObservationIgnored private var openGeneration = 0
 
-    init(converter: MediaConverter = MediaConverter()) {
+    init(converter: MediaConverter = MediaConverter(), defaults: UserDefaults = .standard) {
         self.converter = converter
+        self.defaults = defaults
+        ingestHeight = defaults.object(forKey: Self.heightKey) as? Int ?? 480
+        ingestFrameStep = max(defaults.object(forKey: Self.stepKey) as? Int ?? 1, 1)
+        var settings = JXLSettings()
+        if let lossless = defaults.object(forKey: Self.losslessKey) as? Bool { settings.lossless = lossless }
+        if let distance = defaults.object(forKey: Self.distanceKey) as? Double { settings.distance = Float(distance) }
+        if let effort = defaults.object(forKey: Self.effortKey) as? Int { settings.effort = effort }
+        jxl = settings
         // AVPlayer's periodic observer also fires on seeks, so the playhead follows scrubbing too.
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(value: 1, timescale: 30), queue: .main) { [weak self] time in
             MainActor.assumeIsolated { self?.currentSeconds = time.seconds }
@@ -137,15 +168,10 @@ final class VideoModel {
         analysisProgress = nil
         errorMessage = nil
         let config = sceneCutConfig
-        analysisTask = Task {
+        analysisTask = Task(priority: .utility) {
+            let relay = ProgressRelay { [weak self] in self?.analysisProgress = $0 }
             do {
-                let found = try await SceneCutDetector().analyze(url: url, config: config) { update in
-                    Task { @MainActor [weak self] in
-                        // Updates hop threads, so ignore one that arrives after a later one.
-                        guard let self, update.frame >= (self.analysisProgress?.frame ?? 0) else { return }
-                        self.analysisProgress = update
-                    }
-                }
+                let found = try await SceneCutDetector().analyze(url: url, config: config, progress: relay.report)
                 selectedSceneIndex = nil
                 scenes = found
                 loadThumbnails(for: found)
@@ -155,6 +181,7 @@ final class VideoModel {
             } catch {
                 errorMessage = "Analysis failed: \(error.localizedDescription)"
             }
+            await relay.finish()
             isAnalyzing = false
             analysisProgress = nil
         }
@@ -171,12 +198,22 @@ final class VideoModel {
             generator.maximumSize = CGSize(width: 240, height: 240)
             generator.requestedTimeToleranceBefore = .zero
             generator.requestedTimeToleranceAfter = .zero
+            // Thumbnails are published in batches: with thousands of scenes, one UI update per thumbnail would
+            // re-drive the timeline thousands of times.
+            var batch: [Int: CGImage] = [:]
+            var lastPublish = ContinuousClock.now
             for scene in scenes {
                 if Task.isCancelled { return }
                 if let result = try? await generator.image(at: CMTime(seconds: scene.startTime, preferredTimescale: 60000)) {
-                    thumbnails[scene.index] = result.image
+                    batch[scene.index] = result.image
+                }
+                if lastPublish.duration(to: .now) > .milliseconds(150) {
+                    thumbnails.merge(batch) { $1 }
+                    batch = [:]
+                    lastPublish = .now
                 }
             }
+            thumbnails.merge(batch) { $1 }
         }
     }
 
@@ -251,32 +288,85 @@ final class VideoModel {
         }
     }
 
-    // MARK: Export
+    // MARK: Ingest
 
-    func export(to directory: URL) async {
-        guard let url = videoURL, !scenes.isEmpty, !isExporting else { return }
+    var isBusy: Bool { isConverting || isAnalyzing || isIngesting }
+
+    /// Stops whatever is running: the conversion, the scene scan, or the ingest (which removes its partial folder).
+    func cancelWork() {
+        conversionTask?.cancel()
+        analysisTask?.cancel()
+        ingestTask?.cancel()
+    }
+
+    /// Starts an ingest into a new folder inside `parent` and returns immediately; the work runs in the background.
+    func beginIngest(into parent: URL) {
+        guard let url = videoURL, !scenes.isEmpty, !isIngesting, !isAnalyzing else { return }
         guard let encoder = FrameEncoders.jpegXL(jxl) else {
-            errorMessage = "JPEG XL export needs the JXLKit package linked to the app (see Packages/JXLKit)."
+            errorMessage = "JPEG XL needs the JXLKit package linked to the app (see Packages/JXLKit)."
             return
         }
-        let granted = directory.startAccessingSecurityScopedResource()
-        defer { if granted { directory.stopAccessingSecurityScopedResource() } }
-
-        isExporting = true
-        exportProgress = 0
+        let granted = parent.startAccessingSecurityScopedResource()
+        isIngesting = true
+        ingestProgress = nil
+        ingestFolder = nil
+        ingestStatistics = nil
         errorMessage = nil
-        var options = ExportOptions(selection: representativeOnly ? .representative : .every(max(exportEveryNth, 1)))
+        statusMessage = nil
+
+        var options = ExportOptions()
+        options.targetHeight = ingestHeight > 0 ? ingestHeight : nil
+        options.frameStep = max(ingestFrameStep, 1)
         options.chain = filters.chain
-        do {
-            let manifest = try await FrameExporter().export(
-                url: url, scenes: scenes, to: directory, options: options, encoder: encoder, sourceName: sourceName
-            ) { fraction in
-                Task { @MainActor in self.exportProgress = fraction }
+        let scenes = scenes
+        let name = sourceName ?? url.lastPathComponent
+        let movieName = (name as NSString).deletingPathExtension
+
+        // Low priority: the user's own interaction always wins over the ingest.
+        ingestTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            let relay = ProgressRelay { [weak self] in self?.ingestProgress = $0 }
+            do {
+                let result = try await FrameExporter().export(
+                    url: url, scenes: scenes, toParent: parent, movieName: movieName, options: options,
+                    encoder: encoder, sourceName: name, progress: relay.report
+                )
+                await relay.finish()
+                ingestProgress = nil
+                ingestFolder = result.folder
+                statusMessage = "Wrote the images to “\(result.folder.lastPathComponent)”. Computing statistics…"
+                await computeStatistics(for: result.folder)
+            } catch is CancellationError {
+                await relay.finish()
+                statusMessage = "Ingest cancelled; nothing was kept."
+            } catch {
+                await relay.finish()
+                errorMessage = "Ingest failed: \(error.localizedDescription)"
             }
-            statusMessage = "Exported \(manifest.frames.count) frames to \(directory.lastPathComponent)."
-        } catch {
-            errorMessage = "Export failed: \(error.localizedDescription)"
+            if granted { parent.stopAccessingSecurityScopedResource() }
+            isIngesting = false
+            ingestProgress = nil
         }
-        isExporting = false
+    }
+
+    /// `beginIngest` that waits for the ingest (and its statistics) to finish.
+    func ingest(into parent: URL) async {
+        beginIngest(into: parent)
+        await ingestTask?.value
+    }
+
+    /// Statistics are computed from the images on disk, in the background.
+    private func computeStatistics(for folder: URL) async {
+        isComputingStatistics = true
+        defer { isComputingStatistics = false }
+        do {
+            let statistics = try await IngestFolderScanner.scanInBackground(folder: folder)
+            try? IngestFolderScanner.write(statistics, to: folder)
+            ingestStatistics = statistics
+            showingStatistics = true
+            statusMessage = "Ingested \(statistics.sceneCount) scenes, \(statistics.imageCount.formatted()) images into “\(folder.lastPathComponent)”."
+        } catch {
+            errorMessage = "The images were written, but the statistics failed: \(error.localizedDescription)"
+        }
     }
 }

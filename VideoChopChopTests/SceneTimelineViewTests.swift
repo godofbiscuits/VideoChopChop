@@ -96,6 +96,64 @@ struct SceneTimelineViewTests {
         #expect(view.frame.width <= SceneTimelineView.maxDocumentWidth + 1)
     }
 
+    // MARK: Many scenes
+
+    private func manyScenes(_ count: Int) -> [SceneSegment] {
+        (0..<count).map {
+            SceneSegment(index: $0, startTime: Double($0) * 2, endTime: Double($0) * 2 + 2, startFrame: $0 * 60, endFrame: $0 * 60 + 60, cutScore: 0.9)
+        }
+    }
+
+    @Test func theTimelineIsNotRecomputedWhenNothingHasChanged() {
+        let scenes = manyScenes(5000)
+        let view = SceneTimelineView(frame: NSRect(x: 0, y: 0, width: 800, height: SceneTimelineView.totalHeight))
+        view.fit(toVisibleWidth: 800)
+        view.duration = 10_000
+        view.scenes = scenes
+        view.thumbnails = [0: solidImage(.red)]
+        let passes = view.layoutPassCount
+
+        // What SwiftUI does about 30 times a second during playback: push every property again, and move the playhead.
+        for step in 0..<200 {
+            view.scenes = scenes
+            view.duration = 10_000
+            view.zoom = 1
+            view.thumbnails = [0: solidImage(.red)]
+            view.playhead = Double(step) * 0.033
+        }
+        #expect(view.layoutPassCount == passes, "idle updates must not trigger layout work")
+
+        // A real change still does.
+        view.scenes = manyScenes(4999)
+        #expect(view.layoutPassCount > passes)
+    }
+
+    @Test func paintingAScreenfulOfAHugeTimelineIsCheapAndCorrect() throws {
+        let view = SceneTimelineView(frame: NSRect(x: 0, y: 0, width: 800, height: SceneTimelineView.totalHeight))
+        view.fit(toVisibleWidth: 800)
+        view.duration = 10_000
+        view.scenes = manyScenes(5000)
+        view.thumbnails = Dictionary(uniqueKeysWithValues: (0..<5000).map { ($0, solidImage($0.isMultiple(of: 2) ? .red : .blue)) })
+        view.zoom = 4
+        #expect(view.frame.width > 100_000 || view.frame.width == SceneTimelineView.maxDocumentWidth)
+
+        // Paint only the 800 pt window starting 60,000 pt in: the thumbnail of the scene centred there must be drawn.
+        let window = NSRect(x: 60_000, y: 0, width: 800, height: view.bounds.height)
+        let rep = try #require(view.bitmapImageRepForCachingDisplay(in: window))
+        let started = ContinuousClock.now
+        view.cacheDisplay(in: window, to: rep)
+        let elapsed = started.duration(to: .now)
+        #expect(elapsed < .milliseconds(500), "one screenful took \(elapsed)")
+
+        let scale = CGFloat(rep.pixelsWide) / window.width
+        let spineY = Int((SceneTimelineView.rulerHeight + SceneTimelineView.trackHeight / 2) * scale)
+        let drawn = (0..<rep.pixelsWide).contains { x in
+            guard let c = rep.colorAt(x: x, y: spineY)?.usingColorSpace(.sRGB) else { return false }
+            return (c.redComponent > 0.8 && c.blueComponent < 0.3) || (c.blueComponent > 0.8 && c.redComponent < 0.3)
+        }
+        #expect(drawn, "thumbnails should be visible in the painted window")
+    }
+
     // MARK: Zoom
 
     /// Two 20 s scenes (red then blue thumbnails), so each scene is wider than its thumbnail at the zooms below.
