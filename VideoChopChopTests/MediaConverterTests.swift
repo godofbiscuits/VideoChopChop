@@ -26,12 +26,12 @@ struct MediaProbeAndPlanTests {
       Stream #0:3(eng): Subtitle: subrip
     """
 
-    @Test func parsesCodecsAndDuration() {
+    @Test func parsesCodecsAndDuration() throws {
         let probe = MediaProbe.parse(banner)
         #expect(probe.videoCodec == "h264")
         #expect(probe.audioCodecs == ["dts", "ac3"])
-        let duration = try? #require(probe.duration)
-        #expect(abs((duration ?? 0) - 3723.5) < 0.001)
+        let duration = try #require(probe.duration)
+        #expect(abs(duration - 3723.5) < 0.001)
     }
 
     @Test func parsesAFileWithNoAudio() {

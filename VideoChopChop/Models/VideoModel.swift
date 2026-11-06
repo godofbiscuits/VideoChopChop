@@ -135,11 +135,11 @@ final class VideoModel {
             conversionProgress = 0
             statusMessage = "Converting \(chosen.lastPathComponent)…"
             let converter = converter
-            let task = Task {
-                try await converter.prepare(chosen) { fraction in
-                    Task { @MainActor [weak self] in self?.conversionProgress = fraction }
-                }
+            // Built here, on the main actor, so the weak capture is of the real `self`, not of a task's captured copy.
+            let report: @Sendable (Double) -> Void = { [weak self] fraction in
+                Task { @MainActor in self?.conversionProgress = fraction }
             }
+            let task = Task { try await converter.prepare(chosen, progress: report) }
             conversionTask = task
             do {
                 url = try await task.value
@@ -174,7 +174,8 @@ final class VideoModel {
         analysisProgress = nil
         errorMessage = nil
         let config = sceneCutConfig
-        analysisTask = Task(priority: .utility) {
+        analysisTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
             let relay = ProgressRelay { [weak self] in self?.analysisProgress = $0 }
             do {
                 let found = try await SceneCutDetector().analyze(url: url, config: config, progress: relay.report)
@@ -260,7 +261,7 @@ final class VideoModel {
     private func observePlaybackEnd(of item: AVPlayerItem) {
         endObserver?.cancel()
         endObserver = Task { [weak self] in
-            for await _ in NotificationCenter.default.notifications(named: .AVPlayerItemDidPlayToEndTime, object: item) {
+            for await _ in NotificationCenter.default.notifications(named: AVPlayerItem.didPlayToEndTimeNotification, object: item) {
                 self?.sceneDidFinishPlaying()
             }
         }

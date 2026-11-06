@@ -72,13 +72,13 @@ nonisolated extension FilterChain.Step {
 
 /// Custom Core Image kernels, precompiled from Kernels.ci.metal into the app's default.metallib.
 ///
-/// Requires the target build settings `MTL_COMPILER_FLAGS = -fcikernel` and `MTLLINKER_FLAGS = -cikernel`
+/// Requires the target build settings `MTL_COMPILER_FLAGS = -fcikernel` and `MTLLINKER_FLAGS = -fcikernel`
 /// (set through Metal.xcconfig); without them the metallib can't be loaded as Core Image kernels.
 nonisolated enum CustomKernels {
     private final class BundleToken {}
 
     // CIKernel is immutable after creation and safe to share across threads.
-    nonisolated(unsafe) static let oklabTweak: CIColorKernel? = {
+    static let oklabTweak: CIColorKernel? = {
         let bundle = Bundle(for: BundleToken.self)
         guard let url = bundle.url(forResource: "default", withExtension: "metallib"),
               let data = try? Data(contentsOf: url) else { return nil }
@@ -88,7 +88,7 @@ nonisolated enum CustomKernels {
 
 /// Runs Metal Performance Shaders image kernels on Core Image images (render → MPS → wrap back).
 nonisolated final class MPSPass: @unchecked Sendable {
-    nonisolated(unsafe) static let shared = MPSPass()
+    static let shared = MPSPass()
 
     private let device: any MTLDevice
     private let queue: any MTLCommandQueue

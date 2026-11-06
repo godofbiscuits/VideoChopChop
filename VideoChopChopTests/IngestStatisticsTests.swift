@@ -240,7 +240,7 @@ struct IngestEndToEndTests {
         #expect(second.jxl.distance == 2.5 && second.jxl.lossless)
     }
 
-    @Test func theUIStaysResponsiveWhileScanningAndIngesting() async throws {
+    @MainActor @Test func theUIStaysResponsiveWhileScanningAndIngesting() async throws {
         // Long enough that the scan and ingest take a few seconds of real work.
         let video = try await makeTestVideo(segments: [
             .solid(220, 30, 30, frames: 150), .solid(30, 30, 220, frames: 150), .horizontalGradient(frames: 150),
@@ -255,35 +255,34 @@ struct IngestEndToEndTests {
         // A heartbeat on the main actor: if anything blocks the main thread, the gap between ticks grows.
         // The longest gap is tracked per phase so a stall can be pinned on what caused it.
         let model = VideoModel(defaults: freshDefaults())   // (creating the app's model is launch cost, not a stall)
-        var phase = "open"
-        var longestGap: [String: Duration] = [:]
-        var ticks = 0
+        // The state lives in a main-actor box so the heartbeat task and the test body share it without a race.
+        let beat = HeartbeatState()
         let heartbeat = Task { @MainActor in
             var last = ContinuousClock.now
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(10))
                 let now = ContinuousClock.now
-                longestGap[phase] = max(longestGap[phase] ?? .zero, last.duration(to: now))
-                ticks += 1
+                beat.longestGap[beat.phase] = max(beat.longestGap[beat.phase] ?? .zero, last.duration(to: now))
+                beat.ticks += 1
                 last = now
             }
         }
 
         let started = ContinuousClock.now
         await model.open(video)
-        phase = "scan"
+        beat.phase = "scan"
         #expect(await wait(timeout: 60) { model.scenes.count == 3 && !model.isAnalyzing })
-        phase = "ingest"
+        beat.phase = "ingest"
         await model.ingest(into: parent)
         let elapsed = started.duration(to: .now)
         heartbeat.cancel()
 
         #expect(model.ingestStatistics?.imageCount == 450)
-        #expect(ticks > 50, "the heartbeat ran \(ticks) times in \(elapsed)")
+        #expect(beat.ticks > 50, "the heartbeat ran \(beat.ticks) times in \(elapsed)")
         // 10 ms ticks; ~100 ms would be a visible hitch. The bound is loose because this is a loaded debug build.
-        let worst = longestGap.values.max() ?? .zero
-        #expect(worst < .milliseconds(250), "longest main-thread stall \(longestGap) during \(elapsed) of scan + ingest")
-        print("RESPONSIVENESS elapsed=\(elapsed) ticks=\(ticks) longestGapByPhase=\(longestGap)")
+        let worst = beat.longestGap.values.max() ?? .zero
+        #expect(worst < .milliseconds(250), "longest main-thread stall \(beat.longestGap) during \(elapsed) of scan + ingest")
+        print("RESPONSIVENESS elapsed=\(elapsed) ticks=\(beat.ticks) longestGapByPhase=\(beat.longestGap)")
     }
 }
 
@@ -326,4 +325,11 @@ struct StatisticsWindowTests {
 
 private extension Array {
     func striding(by step: Int) -> [Element] { stride(from: 0, to: count, by: step).map { self[$0] } }
+}
+
+@MainActor
+private final class HeartbeatState {
+    var phase = "open"
+    var longestGap: [String: Duration] = [:]
+    var ticks = 0
 }

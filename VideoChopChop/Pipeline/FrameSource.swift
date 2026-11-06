@@ -43,7 +43,7 @@ actor FrameSource {
     nonisolated let preferredTransform: CGAffineTransform
 
     private let reader: AVAssetReader
-    private let output: AVAssetReaderTrackOutput
+    private let provider: AVAssetReaderOutput.Provider<CMReadySampleBuffer<CMSampleBuffer.DynamicContent>>
     private var nextIndex = 0
 
     static func open(url: URL) async throws -> FrameSource {
@@ -64,13 +64,14 @@ actor FrameSource {
         let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
         ])
-        output.alwaysCopiesSampleData = false
-        reader.add(output)
-        guard reader.startReading() else {
-            throw FrameSourceError.cannotStartReading(reader.error?.localizedDescription ?? "unknown error")
+        let provider = reader.outputProvider(for: output)
+        do {
+            try reader.start()
+        } catch {
+            throw FrameSourceError.cannotStartReading(error.localizedDescription)
         }
         self.reader = reader
-        self.output = output
+        self.provider = provider
         self.duration = duration
         self.frameRate = frameRate
         self.size = size
@@ -78,11 +79,14 @@ actor FrameSource {
     }
 
     /// Returns the next frame, or nil at the end of the video.
-    func next() throws -> VideoFrame? {
-        while let sample = output.copyNextSampleBuffer() {
-            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sample) else { continue }
-            defer { nextIndex += 1 }
-            return VideoFrame(index: nextIndex, time: CMSampleBufferGetPresentationTimeStamp(sample), pixelBuffer: pixelBuffer)
+    func next() async throws -> VideoFrame? {
+        // Provider.next() wraps the blocking copyNextSampleBuffer(); run it on the dedicated decode queue, not the shared pool.
+        while let sample = try await withTaskExecutorPreference(decodeQueue, operation: { try await provider.next() }) {
+            guard let pixelSample = CMReadySampleBuffer<CVReadOnlyPixelBuffer>(sample) else { continue }
+            let index = nextIndex, time = pixelSample.presentationTimeStamp
+            nextIndex += 1
+            // VideoFrame is Sendable, which is what lets the pixel buffer leave the closure.
+            return pixelSample.content.withUnsafeBuffer { VideoFrame(index: index, time: time, pixelBuffer: $0) }
         }
         if reader.status == .failed, let error = reader.error { throw error }
         return nil
