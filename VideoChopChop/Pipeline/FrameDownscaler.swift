@@ -4,8 +4,11 @@
 //
 //  Shrinks a decoded frame to the scene-cut signature size on the GPU.
 //
-//  EXCEPTION to the scaling / box-blur rule: this deliberately uses Metal Performance Shaders'
-//  Lanczos scaler rather than a box (area-average) filter or the Core Image scaler. Measured on
+//  EXCEPTION to the scaling rule (prefer box / area-average downscaling, to avoid the ringing and
+//  contrast / edge promotion of filters like Lanczos so the source's colour data stays faithful).
+//  Allowed here because the output is only a 64×36 comparison signature for scene-cut detection,
+//  never an image the user keeps, and video frames are not photographs. This deliberately uses
+//  Metal Performance Shaders' Lanczos scaler rather than a box filter or the Core Image scaler. Measured on
 //  1080p frames in Release, the Core Image downscale cost 6–8 ms per frame (99% of the scan's
 //  analysis time) against about 1.9 ms for MPS Lanczos (0.65 ms on the GPU), with cut scores
 //  within 0.008 of the old ones (the cut threshold is 0.35). A custom box kernel was a further
