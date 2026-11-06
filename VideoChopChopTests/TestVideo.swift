@@ -8,7 +8,9 @@
 import AVFoundation
 import CoreVideo
 
-struct TestSegment {
+/// Not main-actor isolated: generating frames is CPU-heavy, and tests that measure main-thread responsiveness
+/// would otherwise be stalled by other tests building videos.
+nonisolated struct TestSegment: Sendable {
     var frames: Int
     /// Returns (r, g, b) for a pixel given its x position (0...1) and progress through the segment (0...1).
     var color: @Sendable (_ x: Double, _ t: Double) -> (UInt8, UInt8, UInt8)
@@ -33,9 +35,9 @@ struct TestSegment {
     }
 }
 
-enum TestVideoError: Error { case writerFailed(String) }
+nonisolated enum TestVideoError: Error { case writerFailed(String) }
 
-func makeTestVideo(segments: [TestSegment], width: Int = 320, height: Int = 180, fps: Int32 = 30) async throws -> URL {
+nonisolated func makeTestVideo(segments: [TestSegment], width: Int = 320, height: Int = 180, fps: Int32 = 30) async throws -> URL {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("test-\(UUID().uuidString).mov")
     let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
     let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -64,7 +66,7 @@ func makeTestVideo(segments: [TestSegment], width: Int = 320, height: Int = 180,
 
 /// One frame of a segment as a read-only pixel buffer. Built in its own function so the buffer is handed to the
 /// writer as a fresh value (nothing else keeps a reference to it).
-private func makeTestFrame(segment: TestSegment, index i: Int, width: Int, height: Int) throws -> CVReadOnlyPixelBuffer {
+private nonisolated func makeTestFrame(segment: TestSegment, index i: Int, width: Int, height: Int) throws -> CVReadOnlyPixelBuffer {
     var created: CVPixelBuffer?
     CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, nil, &created)
     guard let buffer = created else { throw TestVideoError.writerFailed("no buffer") }

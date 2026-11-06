@@ -5,12 +5,20 @@
 //  Created by Jeffrey Barbose on 11/5/26.
 //
 
+import AppIntents
 import SwiftUI
 
 @main
 struct VideoChopChopApp: App {
-    /// Shared by the main window and the Statistics window.
-    @State private var model = VideoModel()
+    /// Shared by the main window, the Statistics window and the App Intents.
+    @State private var model: VideoModel
+
+    init() {
+        let model = VideoModel()
+        _model = State(initialValue: model)
+        AppContext.model = model
+        VideoChopChopShortcuts.updateAppShortcutParameters()
+    }
 
     var body: some Scene {
         WindowGroup {

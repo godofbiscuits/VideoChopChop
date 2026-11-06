@@ -33,6 +33,8 @@ final class VideoModel {
     private(set) var ingestFolder: URL?
     private(set) var ingestStatistics: IngestStatistics?
     private(set) var isComputingStatistics = false
+    /// The folder the last export went into. Voice / Shortcuts exports reuse it (they can't show a folder panel).
+    private(set) var exportFolder: URL?
     /// Statistics from the detected scenes, available as soon as the scan finishes (nothing written yet).
     private(set) var sceneStatistics: IngestStatistics?
     /// A request to bring the statistics window forward; the window opener resets it to false.
@@ -308,13 +310,15 @@ final class VideoModel {
     }
 
     /// Starts an ingest into a new folder inside `parent` and returns immediately; the work runs in the background.
-    func beginIngest(into parent: URL) {
+    /// `height` / `frameStep` override the saved settings for this run only (0 height = original size).
+    func beginIngest(into parent: URL, height: Int? = nil, frameStep: Int? = nil) {
         guard let url = videoURL, !scenes.isEmpty, !isIngesting, !isAnalyzing else { return }
         guard let encoder = FrameEncoders.jpegXL(jxl) else {
             errorMessage = "JPEG XL needs the JXLKit package linked to the app (see Packages/JXLKit)."
             return
         }
         let granted = parent.startAccessingSecurityScopedResource()
+        exportFolder = parent
         isIngesting = true
         ingestProgress = nil
         ingestFolder = nil
@@ -323,8 +327,9 @@ final class VideoModel {
         statusMessage = nil
 
         var options = ExportOptions()
-        options.targetHeight = ingestHeight > 0 ? ingestHeight : nil
-        options.frameStep = max(ingestFrameStep, 1)
+        let chosenHeight = height ?? ingestHeight
+        options.targetHeight = chosenHeight > 0 ? chosenHeight : nil
+        options.frameStep = max(frameStep ?? ingestFrameStep, 1)
         options.chain = filters.chain
         let scenes = scenes
         let name = sourceName ?? url.lastPathComponent
@@ -358,8 +363,8 @@ final class VideoModel {
     }
 
     /// `beginIngest` that waits for the ingest (and its statistics) to finish.
-    func ingest(into parent: URL) async {
-        beginIngest(into: parent)
+    func ingest(into parent: URL, height: Int? = nil, frameStep: Int? = nil) async {
+        beginIngest(into: parent, height: height, frameStep: frameStep)
         await ingestTask?.value
     }
 

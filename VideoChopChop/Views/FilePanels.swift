@@ -36,6 +36,7 @@ enum FilePanels {
         }
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         defaults.set(url.path, forKey: lastIngestFolderKey)
+        ExportDestination.remember(url, defaults: defaults)
         return url
     }
 }
