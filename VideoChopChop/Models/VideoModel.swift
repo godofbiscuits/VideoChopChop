@@ -33,6 +33,9 @@ final class VideoModel {
     private(set) var ingestFolder: URL?
     private(set) var ingestStatistics: IngestStatistics?
     private(set) var isComputingStatistics = false
+    /// Statistics from the detected scenes, available as soon as the scan finishes (nothing written yet).
+    private(set) var sceneStatistics: IngestStatistics?
+    /// A request to bring the statistics window forward; the window opener resets it to false.
     var showingStatistics = false
 
     var filters = FilterSettings() { didSet { if filters != oldValue { scheduleCompositionUpdate() } } }
@@ -116,6 +119,9 @@ final class VideoModel {
         thumbnails = [:]
         selectedSceneIndex = nil
         scenes = []
+        sceneStatistics = nil
+        ingestStatistics = nil
+        ingestFolder = nil
         statusMessage = nil
         errorMessage = nil
         isConverting = false
@@ -174,6 +180,7 @@ final class VideoModel {
                 let found = try await SceneCutDetector().analyze(url: url, config: config, progress: relay.report)
                 selectedSceneIndex = nil
                 scenes = found
+                sceneStatistics = IngestStatistics.make(scenes: found)
                 loadThumbnails(for: found)
                 statusMessage = "Found \(found.count) scene\(found.count == 1 ? "" : "s")."
             } catch is CancellationError {

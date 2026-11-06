@@ -8,8 +8,9 @@
 import SwiftUI
 
 struct ContentView: View {
-    @State private var model = VideoModel()
+    let model: VideoModel
     @State private var showingInspector = true
+    @Environment(\.openWindow) private var openWindow
 
     /// The timeline plus room for its always-visible scroll bar.
     private let timelineHeight = SceneTimelineView.totalHeight + 18
@@ -45,10 +46,11 @@ struct ContentView: View {
                 Button("Inspector", systemImage: "sidebar.right") { showingInspector.toggle() }
             }
         }
-        .sheet(isPresented: $model.showingStatistics) {
-            if let statistics = model.ingestStatistics {
-                IngestStatsView(statistics: statistics, folder: model.ingestFolder, sourceName: model.sourceName)
-            }
+        // Statistics live in their own non-modal window; the model only raises a request to show it.
+        .onChange(of: model.showingStatistics) { _, requested in
+            guard requested else { return }
+            openWindow(id: StatisticsWindow.windowID)
+            model.showingStatistics = false
         }
         .alert("Something went wrong", isPresented: Binding(
             get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } }
@@ -145,5 +147,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(model: VideoModel())
 }

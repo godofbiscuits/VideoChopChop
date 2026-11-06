@@ -85,7 +85,7 @@ struct InspectorView: View {
                     Button("Export as Images…", action: onIngest)
                         .disabled(model.scenes.isEmpty || model.isAnalyzing || model.isComputingStatistics)
                 }
-                if model.ingestStatistics != nil {
+                if model.sceneStatistics != nil || model.ingestStatistics != nil {
                     Button("Show Statistics") { model.showingStatistics = true }
                 }
                 if !model.canExportJXL {

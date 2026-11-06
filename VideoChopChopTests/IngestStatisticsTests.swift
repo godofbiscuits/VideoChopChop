@@ -3,7 +3,9 @@
 //  VideoChopChopTests
 //
 
+import AppKit
 import Foundation
+import SwiftUI
 import Testing
 @testable import VideoChopChop
 
@@ -53,6 +55,20 @@ struct IngestStatisticsMathTests {
         #expect(statistics.secondsPerScene.min == 1 && statistics.secondsPerScene.max == 3)
         #expect(statistics.averageBytesPerImage == 10_000)
         #expect(statistics.framesPerScene.histogram.reduce(0) { $0 + $1.count } == 3)
+    }
+
+    @Test func statisticsComeStraightFromTheScannedScenes() throws {
+        let scenes = [
+            SceneSegment(index: 0, startTime: 0, endTime: 1, startFrame: 0, endFrame: 30, cutScore: 0),
+            SceneSegment(index: 1, startTime: 1, endTime: 3, startFrame: 30, endFrame: 90, cutScore: 0.8),
+            SceneSegment(index: 2, startTime: 3, endTime: 6, startFrame: 90, endFrame: 180, cutScore: 0.7),
+        ]
+        let statistics = try #require(IngestStatistics.make(scenes: scenes))
+        #expect(statistics.sceneCount == 3 && statistics.frameCount == 180)
+        #expect(statistics.frameRate == 30)
+        #expect(statistics.averageFramesPerScene == 60 && statistics.averageSecondsPerScene == 2)
+        #expect(statistics.imageCount == 0 && statistics.totalBytes == 0 && statistics.imageSizes.isEmpty)
+        #expect(IngestStatistics.make(scenes: []) == nil)
     }
 
     @Test func aZeroFrameRateDoesNotDivideByZero() {
@@ -181,6 +197,11 @@ struct IngestEndToEndTests {
         await model.open(video)
         #expect(await wait(timeout: 15) { model.scenes.count == 3 && !model.isAnalyzing }, "scenes: \(model.scenes.count)")
 
+        // Statistics exist straight after the scan, from the scenes, before anything is exported.
+        let fromVideo = try #require(model.sceneStatistics)
+        #expect(fromVideo.sceneCount == 3 && fromVideo.frameCount == 90 && fromVideo.imageCount == 0)
+        #expect(model.ingestStatistics == nil)
+
         await model.ingest(into: parent)
 
         #expect(model.errorMessage == nil, "\(model.errorMessage ?? "")")
@@ -264,4 +285,45 @@ struct IngestEndToEndTests {
         #expect(worst < .milliseconds(250), "longest main-thread stall \(longestGap) during \(elapsed) of scan + ingest")
         print("RESPONSIVENESS elapsed=\(elapsed) ticks=\(ticks) longestGapByPhase=\(longestGap)")
     }
+}
+
+@MainActor
+struct StatisticsWindowTests {
+    /// Renders the statistics view offscreen and checks the two histograms sit side by side.
+    @Test func theTwoHistogramsAreSideBySide() throws {
+        let scenes = (0..<40).map { i in
+            let start = i * (20 + (i * 7) % 50)
+            return SceneSegment(index: i, startTime: Double(start) / 25, endTime: Double(start + 20 + (i * 7) % 50) / 25,
+                                startFrame: start, endFrame: start + 20 + (i * 7) % 50, cutScore: 0.5)
+        }
+        let statistics = try #require(IngestStatistics.make(scenes: scenes))
+        let view = IngestStatsView(statistics: statistics, source: .video, folder: nil, sourceName: "Test.mkv")
+        let host = NSHostingView(rootView: view)
+        host.frame = NSRect(x: 0, y: 0, width: 980, height: 480)
+        host.layoutSubtreeIfNeeded()
+        #expect(host.fittingSize.width < 1400)
+
+        let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        if let png = bitmap.representation(using: .png, properties: [:]) {
+            Attachment.record(png, named: "statistics-window.png")
+        }
+        // Two charts of equal width: both halves of the lower part contain accent-coloured bars.
+        func hasBars(inLeftHalf left: Bool) -> Bool {
+            let width = bitmap.pixelsWide, height = bitmap.pixelsHigh
+            let xs = left ? Array(0..<width / 2) : Array(width / 2..<width)
+            for y in stride(from: height / 2, to: height, by: 4) {
+                for x in xs.striding(by: 4) {
+                    guard let c = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                    if c.blueComponent > 0.6 && c.redComponent < 0.4 { return true }
+                }
+            }
+            return false
+        }
+        #expect(hasBars(inLeftHalf: true) && hasBars(inLeftHalf: false))
+    }
+}
+
+private extension Array {
+    func striding(by step: Int) -> [Element] { stride(from: 0, to: count, by: step).map { self[$0] } }
 }

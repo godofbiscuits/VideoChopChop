@@ -90,6 +90,17 @@ nonisolated struct IngestStatistics: Codable, Sendable, Equatable {
     var averageFramesPerScene: Double { framesPerScene.mean }
     var averageSecondsPerScene: Double { secondsPerScene.mean }
 
+    /// Statistics straight from the scan's scenes, before any image exists (no image or file-size figures).
+    /// The frame rate is derived from the last scene's end (its frame count over its end time).
+    static func make(scenes: [SceneSegment]) -> IngestStatistics? {
+        guard let last = scenes.last else { return nil }
+        let frameRate = last.endTime > 0 ? Double(last.endFrame) / last.endTime : 0
+        return make(
+            framesPerScene: scenes.map { $0.endFrame - $0.startFrame }, frameCount: last.endFrame, imageCount: 0,
+            frameRate: frameRate, frameStep: 1, totalBytes: 0, imageSizes: []
+        )
+    }
+
     /// Pure statistics from per-scene frame spans.
     static func make(
         framesPerScene: [Int], frameCount: Int, imageCount: Int, frameRate: Double, frameStep: Int, totalBytes: Int, imageSizes: [String]
