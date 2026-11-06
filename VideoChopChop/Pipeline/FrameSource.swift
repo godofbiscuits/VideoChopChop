@@ -25,7 +25,17 @@ nonisolated enum FrameSourceError: Error {
 }
 
 /// Streams BGRA frames from the first video track of a movie file.
+///
+/// `AVAssetReaderOutput.copyNextSampleBuffer()` is a *blocking* call: it waits on the media pipeline for the next
+/// decoded frame. Running it on Swift concurrency's shared worker pool (one worker per core) lets a handful of
+/// concurrent readers occupy every worker, starving the very tasks the media pipeline needs in order to make
+/// progress (e.g. an AVAssetWriter being fed in an async loop), which is a deadlock. So this actor runs on its own
+/// serial executor, a dedicated dispatch queue: the blocking wait ties up that queue's thread and nothing else.
+/// (A custom executor is the one place a dispatch queue is the right tool; there is no async reader API.)
 actor FrameSource {
+    private let decodeQueue = DispatchSerialQueue(label: "VideoChopChop.FrameSource.decode", qos: .utility)
+    nonisolated var unownedExecutor: UnownedSerialExecutor { decodeQueue.asUnownedSerialExecutor() }
+
     nonisolated let duration: Double
     nonisolated let frameRate: Double
     /// Pixel size of the stored frames (before `preferredTransform`).
