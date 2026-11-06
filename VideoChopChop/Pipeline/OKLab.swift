@@ -58,6 +58,16 @@ nonisolated enum OKLabMath {
         return pixels
     }
 
+    /// Converts linear-light RGBA floats (4 per pixel, as produced by the GPU downscale) to OKLab pixels.
+    /// Values are clamped to 0...1 first, since Lanczos ringing can overshoot slightly.
+    static func convert(linearRGBA values: [Float], pixelCount: Int) -> [OKLab] {
+        (0..<pixelCount).map { i in
+            fromLinear(
+                r: min(max(values[i * 4], 0), 1), g: min(max(values[i * 4 + 1], 0), 1), b: min(max(values[i * 4 + 2], 0), 1)
+            )
+        }
+    }
+
     /// Mean per-pixel OKLab distance between two equally sized images.
     static func meanDeltaE(_ lhs: [OKLab], _ rhs: [OKLab]) -> Float {
         precondition(lhs.count == rhs.count, "images must be the same size")

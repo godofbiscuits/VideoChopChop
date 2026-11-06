@@ -103,6 +103,7 @@ nonisolated struct CutDecider: Sendable {
 actor SceneCutDetector {
     private let context = CIContext(options: [.cacheIntermediates: false])
     private let sRGB = CGColorSpace(name: CGColorSpace.sRGB)!
+    private let downscaler = FrameDownscaler(width: FrameSignature.width, height: FrameSignature.height)
 
     struct Cut: Sendable {
         let frame: Int
@@ -127,9 +128,12 @@ actor SceneCutDetector {
         var lastTime = 0.0
         var frameCount = 0
 
-        while let frame = try await source.next() {
+        var upcomingFrame = try await source.next()
+        while let frame = upcomingFrame {
+            // Decode the next frame while this one is analyzed (decode and analysis cost about the same).
+            async let following = source.next()
             try Task.checkCancellation()
-            let signature = makeSignature(frame.pixelBuffer)
+            let signature = await makeSignature(frame.pixelBuffer)
             if let previous {
                 let score = signature.cutScore(from: previous.signature)
                 if decider.isCut(score: score, time: frame.seconds) {
@@ -148,6 +152,7 @@ actor SceneCutDetector {
                     seconds: frame.seconds, duration: source.duration
                 ))
             }
+            upcomingFrame = try await following
         }
         // Done: the total is now exact, and the head sits at the end.
         progress?(AnalysisProgress(frame: frameCount, totalFrames: frameCount, seconds: source.duration, duration: source.duration))
@@ -168,8 +173,12 @@ actor SceneCutDetector {
         }
     }
 
-    private func makeSignature(_ pixelBuffer: CVPixelBuffer) -> FrameSignature {
+    private func makeSignature(_ pixelBuffer: CVPixelBuffer) async -> FrameSignature {
         let w = FrameSignature.width, h = FrameSignature.height
+        // GPU path (MPS Lanczos on linear light); Core Image below is the fallback.
+        if let downscaler, let linear = await downscaler.linearRGBA(of: pixelBuffer) {
+            return FrameSignature(pixels: OKLabMath.convert(linearRGBA: linear, pixelCount: w * h))
+        }
         let image = CIImage(cvPixelBuffer: pixelBuffer)
         let scaleY = Double(h) / image.extent.height
         let scaleX = Double(w) / image.extent.width

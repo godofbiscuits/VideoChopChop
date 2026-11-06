@@ -3,6 +3,7 @@
 //  VideoChopChopTests
 //
 
+import CoreVideo
 import Foundation
 import Testing
 @testable import VideoChopChop
@@ -69,5 +70,47 @@ struct SceneCutDetectorTests {
         defer { try? FileManager.default.removeItem(at: url) }
         let scenes = try await SceneCutDetector().analyze(url: url)
         #expect(scenes.count == 2)
+    }
+}
+
+struct FrameDownscalerTests {
+    private func solidBuffer(width: Int, height: Int, b: UInt8, g: UInt8, r: UInt8) throws -> CVPixelBuffer {
+        var buffer: CVPixelBuffer?
+        let attributes: [CFString: Any] = [kCVPixelBufferIOSurfacePropertiesKey: [String: Any](), kCVPixelBufferMetalCompatibilityKey: true]
+        #expect(CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA, attributes as CFDictionary, &buffer) == kCVReturnSuccess)
+        let pixelBuffer = try #require(buffer)
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+        let base = CVPixelBufferGetBaseAddress(pixelBuffer)!.assumingMemoryBound(to: UInt8.self)
+        let stride = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        for y in 0..<height { for x in 0..<width {
+            let p = base + y * stride + x * 4
+            p[0] = b; p[1] = g; p[2] = r; p[3] = 255
+        } }
+        return pixelBuffer
+    }
+
+    @Test func downscalesInLinearLightOnTheGPU() async throws {
+        let downscaler = try #require(FrameDownscaler(width: 64, height: 36))
+        // sRGB 128 is 0.2158 in linear light (not 0.502): the shrink must run on decoded values.
+        let frame = try solidBuffer(width: 1920, height: 1080, b: 128, g: 128, r: 128)
+        let values = try #require(await downscaler.linearRGBA(of: frame))
+        #expect(values.count == 64 * 36 * 4)
+        for i in stride(from: 0, to: values.count, by: 4 * 97) {
+            #expect(abs(values[i] - 0.2158) < 0.005 && abs(values[i + 1] - 0.2158) < 0.005 && abs(values[i + 2] - 0.2158) < 0.005)
+        }
+    }
+
+    @Test func aBlackAndWhiteFrameKeepsItsHalvesApart() async throws {
+        let downscaler = try #require(FrameDownscaler(width: 64, height: 36))
+        let frame = try solidBuffer(width: 640, height: 360, b: 255, g: 255, r: 255)
+        CVPixelBufferLockBaseAddress(frame, [])
+        let base = CVPixelBufferGetBaseAddress(frame)!.assumingMemoryBound(to: UInt8.self)
+        let stride = CVPixelBufferGetBytesPerRow(frame)
+        for y in 0..<360 { for x in 0..<320 { let p = base + y * stride + x * 4; p[0] = 0; p[1] = 0; p[2] = 0 } }
+        CVPixelBufferUnlockBaseAddress(frame, [])
+        let values = try #require(await downscaler.linearRGBA(of: frame))
+        let leftmost = values[0], rightmost = values[(63) * 4]
+        #expect(leftmost < 0.05 && rightmost > 0.95, "left \(leftmost) right \(rightmost)")
     }
 }
