@@ -60,6 +60,9 @@ lipo -create "$WORK"/build-*/ffmpeg -output "$OUT"
 chmod +x "$OUT"
 codesign --force --sign - --options runtime --entitlements "$ENTITLEMENTS" "$OUT"
 
+# The helper carries the sandbox-inherit entitlement, so it only runs inside the sandboxed app
+# (launched from a shell it is killed); verify it by signature and architectures instead of running it.
+codesign --verify --strict "$OUT"
 echo "Built $OUT"
 file "$OUT"
-"$OUT" -hide_banner -version | head -3
+echo "Architectures: $(lipo -archs "$OUT")"
