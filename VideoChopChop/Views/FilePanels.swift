@@ -24,9 +24,9 @@ enum FilePanels {
     /// Picks the folder an ingest's movie folder will be created in. The panel opens where you last chose.
     static func chooseIngestFolder(defaults: UserDefaults = .standard) -> URL? {
         let panel = NSOpenPanel()
-        panel.title = "Choose where to put the ingested frames"
+        panel.title = "Choose where to put the exported images"
         panel.message = "A folder named after the movie will be created inside the one you choose."
-        panel.prompt = "Ingest Here"
+        panel.prompt = "Export Here"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true

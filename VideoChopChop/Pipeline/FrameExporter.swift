@@ -54,7 +54,7 @@ nonisolated enum ExportError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .renderFailed(let frame): "Could not render frame \(frame + 1)."
-        case .noScenes: "There are no scenes to ingest yet."
+        case .noScenes: "There are no scenes to export yet."
         }
     }
 }

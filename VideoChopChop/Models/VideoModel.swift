@@ -338,10 +338,10 @@ final class VideoModel {
                 await computeStatistics(for: result.folder)
             } catch is CancellationError {
                 await relay.finish()
-                statusMessage = "Ingest cancelled; nothing was kept."
+                statusMessage = "Export cancelled; nothing was kept."
             } catch {
                 await relay.finish()
-                errorMessage = "Ingest failed: \(error.localizedDescription)"
+                errorMessage = "Export failed: \(error.localizedDescription)"
             }
             if granted { parent.stopAccessingSecurityScopedResource() }
             isIngesting = false
@@ -364,7 +364,7 @@ final class VideoModel {
             try? IngestFolderScanner.write(statistics, to: folder)
             ingestStatistics = statistics
             showingStatistics = true
-            statusMessage = "Ingested \(statistics.sceneCount) scenes, \(statistics.imageCount.formatted()) images into “\(folder.lastPathComponent)”."
+            statusMessage = "Exported \(statistics.imageCount.formatted()) images in \(statistics.sceneCount) scene folders to “\(folder.lastPathComponent)”."
         } catch {
             errorMessage = "The images were written, but the statistics failed: \(error.localizedDescription)"
         }

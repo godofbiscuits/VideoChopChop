@@ -12,9 +12,12 @@ struct InspectorView: View {
     var body: some View {
         Form {
             Section("Scene detection") {
-                LabeledContent("Sensitivity") {
+                LabeledContent("Cut threshold") {
                     Slider(value: $model.sceneCutConfig.absoluteFloor, in: 0.1...1.0)
                 }
+                Text("A frame counts as a new scene when it differs from the one before by more than this. Lower finds more cuts; higher finds fewer. Press Re-analyze to apply.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Toggle("Confirm with Vision", isOn: $model.sceneCutConfig.confirmWithVision)
                 Button("Re-analyze", action: model.analyze)
                     .disabled(model.videoURL == nil || model.isAnalyzing)
@@ -51,7 +54,7 @@ struct InspectorView: View {
                 Toggle("Sobel edges", isOn: $model.filters.mpsSobelEnabled)
             }
 
-            Section("Ingest (JPEG XL images)") {
+            Section("Export as Images (JPEG XL)") {
                 // The settings are fixed while an ingest runs; the Cancel button below stays usable.
                 Group {
                     Picker("Vertical resolution", selection: $model.ingestHeight) {
@@ -77,9 +80,9 @@ struct InspectorView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if model.isIngesting {
-                    Button("Cancel Ingest", role: .cancel, action: model.cancelWork)
+                    Button("Cancel Export", role: .cancel, action: model.cancelWork)
                 } else {
-                    Button("Ingest…", action: onIngest)
+                    Button("Export as Images…", action: onIngest)
                         .disabled(model.scenes.isEmpty || model.isAnalyzing || model.isComputingStatistics)
                 }
                 if model.ingestStatistics != nil {

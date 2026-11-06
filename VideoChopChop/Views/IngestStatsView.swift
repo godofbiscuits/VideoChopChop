@@ -18,8 +18,8 @@ struct IngestStatsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Ingest statistics").font(.title2.bold())
-                Text("\(sourceName ?? "Video") — computed from the \(statistics.imageCount.formatted()) images on disk")
+                Text("Statistics").font(.title2.bold())
+                Text("\(sourceName ?? "Video") — computed from the \(statistics.imageCount.formatted()) exported images")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
