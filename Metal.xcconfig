@@ -1,5 +1,10 @@
+// Build settings shared by every target (attached under Project > Info > Configurations).
+
 // Metal flags for precompiled Core Image kernels (Filters/Kernels.ci.metal).
-// Attach in Xcode: Project > Info > Configurations > set Debug and Release to this file
-// for the VideoChopChop target (or merge these lines into an existing xcconfig).
 MTL_COMPILER_FLAGS = -fcikernel
 MTLLINKER_FLAGS = -fcikernel
+
+// Xcode's App Intents metadata extractor reports "Metadata extraction skipped, no AppIntents.framework
+// dependency found" as a build warning for any target that doesn't link AppIntents. This app has no App
+// Intents, so it links the framework weakly just to satisfy that check (nothing from it is used).
+OTHER_LDFLAGS = $(inherited) -weak_framework AppIntents
