@@ -75,7 +75,11 @@ nonisolated final class FrameRenderer: @unchecked Sendable {
         guard width > 0, height > 0 else { throw ExportError.renderFailed(frame: frame.index) }
         if let (w, h) = Self.scaledSize(width: width, height: height, targetHeight: targetHeight) {
             let scale = Double(h) / Double(height)
-            // Lanczos for quality; the edge is extended so the last row/column isn't blended with transparency.
+            // EXCEPTION to the box-scaling rule (prefer box / area-average to avoid Lanczos ringing and edge or
+            // contrast promotion, keeping the source's colour data faithful). Kept as Lanczos on purpose: these are
+            // video frames, not photographs, and the scaling stays outside the JXL encoder (libjxl's own resampling
+            // only stores a smaller image that decodes at full size, so it can't produce 480-line files).
+            // The edge is extended so the last row/column isn't blended with transparency.
             image = image
                 .applyingFilter("CILanczosScaleTransform", parameters: [kCIInputScaleKey: scale, kCIInputAspectRatioKey: 1.0])
                 .clampedToExtent()
